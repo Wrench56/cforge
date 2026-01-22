@@ -1,0 +1,8 @@
+# Ignore CCLS cache
+.ccls-cache/
+
+# Ignore cforge.c test script
+./cforge.c
+
+# Ignore cforge executable
+.b
