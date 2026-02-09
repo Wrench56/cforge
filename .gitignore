@@ -6,3 +6,6 @@
 
 # Ignore cforge executable
 .b
+
+# Ignore playground/ directory
+playground/
