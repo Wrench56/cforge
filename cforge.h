@@ -21,6 +21,7 @@ exit 0
 #define CF_MAX_CONFIGS 64
 #define CF_MAX_GLOBS 64
 #define CF_MAX_THRDS 16
+#define CF_MAX_ENVS 256
 
 #define CF_MAX_NAME_LENGTH 127
 #define CF_MAX_COMMAND_LENGTH 1 * 1024
@@ -39,6 +40,9 @@ exit 0
 #define CF_MAX_COMMAND_LENGTH_EC 8
 #define CF_MAX_THRDS_EC 9
 #define CF_TARGET_DEP_CYCLE_EC 10
+#define CF_CONFIG_NOT_FOUND_EC 11
+#define CF_UNKNOWN_ATTR_EC 12
+#define CF_MAX_ENVS_EC 13
 
 typedef void (*cf_target_fn)(void);
 typedef void (*cf_config_fn)(void);
@@ -46,7 +50,8 @@ typedef void (*cf_config_fn)(void);
 
 typedef enum {
     UNKNOWN = 0,
-    DEPENDENCY
+    DEPENDENCY,
+    CONFIG_SET
 } cf_attr_type_t;
 
 typedef struct {
@@ -55,6 +60,9 @@ typedef struct {
         struct {
             const char* target_name;
         } depends;
+        struct {
+            const char* config_name;
+        } configset;
     } arg;
 } cf_attr_t;
 
@@ -78,6 +86,12 @@ typedef struct {
 } cf_config_decl_t;
 
 typedef struct {
+    const char* envname;
+    char* value;
+    bool was_set;
+} cf_env_restore_t;
+
+typedef struct {
     size_t c;
     char** p;
 } cf_glob_t;
@@ -99,6 +113,9 @@ static size_t cf_num_globs = 0;
 
 static thrd_t cf_thrd_pool[CF_MAX_THRDS] = { 0 };
 static size_t cf_num_thrds = 0;
+
+static cf_env_restore_t cf_envs[CF_MAX_ENVS] = { 0 };
+static size_t cf_num_envs = 0;
 
 static cf_state_t cf_state = REGISTER_PHASE;
 
@@ -150,6 +167,7 @@ static void cf_register_target(const char* name, cf_target_fn fn, const cf_attr_
     };
 }
 
+static void cf_restore_env(size_t env_checkpoint);
 static void cf_dfs_execute(cf_target_decl_t* target) {
     if (target->node_status == DONE) {
         return;
@@ -159,23 +177,55 @@ static void cf_dfs_execute(cf_target_decl_t* target) {
     }
 
     target->node_status = VISITING;
+    cf_config_decl_t* config = NULL;
     for (size_t i = 0; i < target->attribs_size; i++) {
         cf_attr_t* attrib = &target->attribs[i];
-        if (attrib->type != DEPENDENCY) {
-            continue;
+        switch (attrib->type) {
+            case DEPENDENCY: {
+                const char* dep_target_name = attrib->arg.depends.target_name;
+                size_t dep_idx = cf_find_target_index(dep_target_name);
+                if (dep_idx >= cf_num_targets) {
+                    CF_ERR_LOG("Error: Target \"%s\" not found!\n", dep_target_name);
+                    exit(CF_TARGET_NOT_FOUND_EC);
+                }
+                
+                cf_dfs_execute(&cf_targets[dep_idx]);
+                break;
+            }
+            case CONFIG_SET: {
+                if (config != NULL) {
+                    CF_WRN_LOG("Warning: Cannot set two or more configs per target. Ignoring...\n");
+                    goto next_attr;
+                }
+                
+                const char* conf_name = attrib->arg.configset.config_name;
+                for (size_t c_idx = 0; c_idx < cf_num_configs; c_idx++) {
+                    if (strncmp(conf_name, cf_configs[c_idx].name, CF_MAX_NAME_LENGTH) == 0) {
+                        config = &cf_configs[c_idx];
+                        goto next_attr;
+                    }
+                }
+                
+                CF_ERR_LOG("Error: Config \"%s\" not found!\n", conf_name);
+                exit(CF_CONFIG_NOT_FOUND_EC);
+                break;
+            }
+            case UNKNOWN: {
+                CF_ERR_LOG("Error: Unknown attribute given for target \"%s\"\n", target->name);
+                exit(CF_UNKNOWN_ATTR_EC);
+            }
         }
 
-        const char* dep_target_name = attrib->arg.depends.target_name;
-        size_t dep_idx = cf_find_target_index(dep_target_name);
-        if (dep_idx >= cf_num_targets) {
-            CF_ERR_LOG("Error: Target \"%s\" not found!\n", dep_target_name);
-            exit(CF_TARGET_NOT_FOUND_EC);
-        }
-        
-        cf_dfs_execute(&cf_targets[dep_idx]);
+next_attr:
+        continue;
     }
 
+    size_t env_checkpoint = cf_num_envs;
+    if (config != NULL) {
+        config->fn();
+    }
     target->fn();
+    cf_restore_env(env_checkpoint);
     target->node_status = DONE;
 }
 
@@ -199,6 +249,62 @@ static void cf_register_config(const char* name, cf_config_fn fn) {
         .name = name,
         .fn = fn
     };
+}
+
+static void cf_setenv_wrapper(const char* ident, char* value) {
+    if (cf_num_envs >= CF_MAX_ENVS) {
+        CF_ERR_LOG("Error: Maximum environment variables of %d was reached!\n", CF_MAX_ENVS);
+        exit(CF_MAX_ENVS_EC);
+    }
+
+    char* envvar = getenv(ident);
+    if (envvar == NULL) {
+        cf_envs[cf_num_envs++] = (cf_env_restore_t) {
+            .envname = ident,
+            .value = NULL,
+            .was_set = false
+        };
+        goto set_env;
+    }
+
+    char* value_block = malloc(strlen(envvar) + 1);
+    if (value_block == NULL) {
+        CF_ERR_LOG("Error: malloc() failed in cf_setenv_wrapper()\n");
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    strcpy(value_block, envvar);
+    cf_envs[cf_num_envs++] = (cf_env_restore_t) {
+        .envname = ident,
+        .value = value_block,
+        .was_set = true
+    };
+
+set_env:
+    if (setenv(ident, value, 1) != 0) {
+        CF_ERR_LOG("Error: setenv() failed in cf_setenv_wrapper()\n");
+        exit(CF_CLIB_FAIL_EC);
+    }
+}
+
+static void cf_restore_env(size_t env_checkpoint) {
+    cf_env_restore_t envres;
+    while (cf_num_envs > env_checkpoint) {
+        envres = cf_envs[--cf_num_envs];
+        if (!envres.was_set) {
+            if (unsetenv(envres.envname) != 0) {
+                CF_ERR_LOG("Error: unsetenv() failed in cf_restore_env()\n");
+                exit(CF_CLIB_FAIL_EC);
+            }
+        } else {
+            if (setenv(envres.envname, envres.value, 1) != 0) {
+                CF_ERR_LOG("Error: setenv() failed in cf_restore_env()\n");
+                exit(CF_CLIB_FAIL_EC);
+            }
+        }
+
+        free(envres.value);
+    }
 }
 
 static cf_glob_t cf_glob(const char* expr) {
@@ -374,7 +480,15 @@ __attribute__((weak)) int main(int argc, char** argv) {
         } \
     }
 
-#define CF_SET_ENV(ident, value) setenv(#ident, value, 1);
+#define CF_WITH_CONFIG(config_ident) \
+    (cf_attr_t) { \
+        .type = CONFIG_SET, \
+        .arg.configset = { \
+            .config_name = #config_ident \
+        } \
+    }
+
+#define CF_SET_ENV(ident, value) cf_setenv_wrapper(#ident, value);
 #define CF_ENV(ident) getenv(#ident)
 
 #endif // CFORGE_H
