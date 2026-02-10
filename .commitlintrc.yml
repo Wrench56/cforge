@@ -24,6 +24,7 @@ rules:
       - target
       - configs
       - core
+      - parallel
   subject-empty:
     level: error
   type:
