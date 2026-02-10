@@ -21,7 +21,6 @@ exit 0
 #define CF_MAX_CONFIGS 64
 #define CF_MAX_GLOBS 64
 #define CF_MAX_THRDS 16
-#define CF_MAX_ENVS 64
 
 #define CF_MAX_NAME_LENGTH 127
 #define CF_MAX_COMMAND_LENGTH 1 * 1024
@@ -40,8 +39,6 @@ exit 0
 #define CF_MAX_COMMAND_LENGTH_EC 8
 #define CF_MAX_THRDS_EC 9
 #define CF_TARGET_DEP_CYCLE_EC 10
-#define CF_MAX_ENVS_EC 11
-#define CF_ENV_NOT_FOUND_EC 12
 
 typedef void (*cf_target_fn)(void);
 typedef void (*cf_config_fn)(void);
@@ -85,15 +82,11 @@ typedef struct {
     char** p;
 } cf_glob_t;
 
-typedef struct {
-    const char* ident;
-    char* value;
-} cf_env_var_t;
-
 typedef enum {
     REGISTER_PHASE = 0,
-    TARGET_PLAN_PHASE = 1,
-    TARGET_EXECUTE_PHASE = 2,
+    CONFIG_CONSTRUCT_PHASE = 1,
+    TARGET_PLAN_PHASE = 2,
+    TARGET_EXECUTE_PHASE = 3,
 } cf_state_t;
 
 static cf_target_decl_t cf_targets[CF_MAX_TARGETS] = { 0 };
@@ -107,9 +100,6 @@ static size_t cf_num_globs = 0;
 
 static thrd_t cf_thrd_pool[CF_MAX_THRDS] = { 0 };
 static size_t cf_num_thrds = 0;
-
-static cf_env_var_t cf_envs[CF_MAX_ENVS] = { 0 };
-static size_t cf_num_envs = 0;
 
 static cf_state_t cf_state = REGISTER_PHASE;
 
@@ -212,43 +202,6 @@ static void cf_register_config(const char* name, cf_config_fn fn) {
     };
 }
 
-static void cf_set_env(const char* ident, char* value) {
-    if (strlen(ident) > CF_MAX_NAME_LENGTH) {
-        CF_ERR_LOG("Error: The environment variable name \"%s\" is too long (max name length: %d)\n", ident, CF_MAX_NAME_LENGTH);
-        exit(CF_NAME_TOO_LONG_EC);
-    }
-
-    if (cf_num_envs >= CF_MAX_ENVS) {
-        CF_ERR_LOG("Error: Maximum environment variables of %d was reached!\n", CF_MAX_ENVS);
-        exit(CF_MAX_ENVS_EC);
-    }
-
-    size_t value_size = strlen(value);
-    if (value_size == 0) {
-        CF_WRN_LOG("Warning: Environment variable \"%s\" was assigned a zero-length value. Skipping...\n", ident);
-        return;
-    }
-
-    void* val_block = malloc(value_size);
-    memcpy(val_block, value, value_size);
-
-    cf_envs[cf_num_envs++] = (cf_env_var_t) {
-        .ident = ident,
-        .value = (char*) val_block
-    };
-}
-
-static char* cf_get_env(const char* ident) {
-    for (size_t i = 0; i < cf_num_envs; i++) {
-        if (strncmp(ident, cf_envs[i].ident, CF_MAX_NAME_LENGTH) == 0) {
-            return cf_envs[i].value;
-        }
-    }
-
-    CF_ERR_LOG("Error: No environment variable exists with name \"%s\"\n", ident);
-    exit(CF_ENV_NOT_FOUND_EC);
-}
-
 static cf_glob_t cf_glob(const char* expr) {
     glob_t glob_res = { 0 };
     uint32_t rc = glob(expr, GLOB_NOSORT | GLOB_MARK | GLOB_NOESCAPE, NULL, &glob_res);
@@ -322,12 +275,15 @@ static void cf_execute_command(bool is_parallel, char* buffer) {
 __attribute__((weak)) int main(int argc, char** argv) {
     (void) cf_register_config;
     (void) cf_register_target;
-    (void) cf_set_env;
-    (void) cf_get_env;
     (void) cf_glob;
 
     if (argc == 1) {
         return CF_SUCCESS_EC;
+    }
+
+    cf_state = CONFIG_CONSTRUCT_PHASE;
+    for (size_t i = 0; i < cf_num_configs; i++) {
+        cf_configs[i].fn();
     }
 
     cf_state = TARGET_EXECUTE_PHASE;
@@ -423,11 +379,5 @@ __attribute__((weak)) int main(int argc, char** argv) {
             .target_name = #target_ident \
         } \
     }
-
-#define CF_SET_ENV(var_ident, value) \
-    cf_set_env(#var_ident, value);
-
-#define CF_ENV(var_ident) \
-    cf_get_env(#var_ident)
 
 #endif // CFORGE_H
