@@ -38,14 +38,38 @@ exit 0
 #define CF_MAX_GLOBS_EC 7
 #define CF_MAX_COMMAND_LENGTH_EC 8
 #define CF_MAX_THRDS_EC 9
+#define CF_TARGET_DEP_CYCLE_EC 10
 
 typedef void (*cf_target_fn)(void);
 typedef void (*cf_config_fn)(void);
 
+
+typedef enum {
+    UNKNOWN = 0,
+    DEPENDENCY
+} cf_attr_type_t;
+
+typedef struct {
+    cf_attr_type_t type;
+    union {
+        struct {
+            const char* target_name;
+        } depends;
+    } arg;
+} cf_attr_t;
+
+typedef enum {
+    UNVISITED = 0,
+    VISITING,
+    DONE
+} cf_dfs_node_status_t;
+
 typedef struct {
     const char* name;
     cf_target_fn fn;
-    bool executed;
+    cf_attr_t* attribs;
+    size_t attribs_size;
+    cf_dfs_node_status_t node_status;
 } cf_target_decl_t;
 
 typedef struct {
@@ -61,7 +85,8 @@ typedef struct {
 typedef enum {
     REGISTER_PHASE = 0,
     CONFIG_CONSTRUCT_PHASE = 1,
-    TARGET_EXECUTE_PHASE = 2,
+    TARGET_PLAN_PHASE = 2,
+    TARGET_EXECUTE_PHASE = 3,
 } cf_state_t;
 
 static cf_target_decl_t cf_targets[CF_MAX_TARGETS] = { 0 };
@@ -78,7 +103,17 @@ static size_t cf_num_thrds = 0;
 
 static cf_state_t cf_state = REGISTER_PHASE;
 
-static void cf_register_target(const char* name, cf_target_fn fn) {
+static size_t cf_find_target_index(const char* target_name) {
+    for (int i = cf_num_targets - 1; i >= 0; i--) {
+        if (strncmp(target_name, cf_targets[i].name, CF_MAX_NAME_LENGTH) == 0) {
+            return i;
+        }
+    }
+
+    return CF_MAX_TARGETS + 1;
+}
+
+static void cf_register_target(const char* name, cf_target_fn fn, const cf_attr_t* attribs, size_t attribs_size) {
     if (cf_state != REGISTER_PHASE) {
         CF_ERR_LOG("Error: Invalid cf_state (%d) when registering target!\n", cf_state);
         exit(CF_INVALID_STATE_EC);
@@ -94,11 +129,51 @@ static void cf_register_target(const char* name, cf_target_fn fn) {
         exit(CF_MAX_TARGETS_EC);
     }
 
+
+    void* attribs_block = malloc(attribs_size * sizeof(cf_attr_t));
+    if (attribs_block == NULL) {
+        CF_ERR_LOG("Error: malloc() failed in cf_register_target()\n");
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    memcpy(attribs_block, attribs, attribs_size * sizeof(cf_attr_t));
+
     cf_targets[cf_num_targets++] = (cf_target_decl_t) {
         .name = name,
         .fn = fn,
-        .executed = false
+        .attribs = (cf_attr_t*) attribs_block,
+        .attribs_size = attribs_size,
+        .node_status = UNVISITED
     };
+}
+
+static void cf_dfs_execute(cf_target_decl_t* target) {
+    if (target->node_status == DONE) {
+        return;
+    } else if (target->node_status == VISITING) {
+        CF_ERR_LOG("Error: Dependency cycle detected for \"%s\"\n", target->name);
+        exit(CF_TARGET_DEP_CYCLE_EC);
+    }
+
+    target->node_status = VISITING;
+    for (size_t i = 0; i < target->attribs_size; i++) {
+        cf_attr_t* attrib = &target->attribs[i];
+        if (attrib->type != DEPENDENCY) {
+            continue;
+        }
+
+        const char* dep_target_name = attrib->arg.depends.target_name;
+        size_t dep_idx = cf_find_target_index(dep_target_name);
+        if (dep_idx > CF_MAX_TARGETS) {
+            CF_ERR_LOG("Error: Target \"%s\" not found!\n", dep_target_name);
+            exit(CF_TARGET_NOT_FOUND_EC);
+        }
+        
+        cf_dfs_execute(&cf_targets[dep_idx]);
+    }
+
+    target->fn();
+    target->node_status = DONE;
 }
 
 static void cf_register_config(const char* name, cf_config_fn fn) {
@@ -160,26 +235,6 @@ static void cf_free_glob(size_t frame_size) {
     }
 }
 
-static void cf_depends_on(const char* name) {
-    if (cf_state != TARGET_EXECUTE_PHASE) {
-        CF_ERR_LOG("Error: Invalid cf_state (%d) when executing dependency!\n", cf_state);
-        exit(CF_INVALID_STATE_EC);
-    }
-
-    for (int64_t i = cf_num_targets - 1; i >= 0; i--) {
-        if (strncmp(name, cf_targets[i].name, CF_MAX_NAME_LENGTH) == 0) {
-            if (!cf_targets[i].executed) {
-                cf_targets[i].fn();
-            }
-
-            return;
-        }
-    }
-
-    CF_ERR_LOG("Error: Could not find target \"%s\" during dependency resolution!\n", name);
-    exit(CF_TARGET_NOT_FOUND_EC);
-}
-
 static int cf_thrd_helper(void* args) {
     if (system((char*) args) != 0) {
         CF_ERR_LOG("Error: Executing command \"%s\" failed\n", (char*) args);
@@ -216,7 +271,6 @@ static void cf_execute_command(bool is_parallel, char* buffer) {
 __attribute__((weak)) int main(int argc, char** argv) {
     (void) cf_register_config;
     (void) cf_register_target;
-    (void) cf_depends_on;
     (void) cf_glob;
 
     if (argc == 1) {
@@ -233,14 +287,12 @@ __attribute__((weak)) int main(int argc, char** argv) {
         for (size_t j = 0; j < cf_num_targets; j++) {
             cf_target_decl_t* target = &cf_targets[j];
             if (strcmp(target->name, argv[i]) == 0) {
-                if (target->executed) {
+                if (target->node_status == DONE) {
                     CF_WRN_LOG("Warning: Target \"%s\" was executed already! Skipping target...\n", argv[i]);
                     goto next_iter;
                 }
-                target->executed = true;
-                target->fn();
+                cf_dfs_execute(target);
                 cf_free_glob(cf_num_globs);
-                /* TODO: Introduces all kinds of issues unless I fix dependency resolution */
                 for (size_t i = cf_num_thrds; i > 0; i--) {
                     thrd_join(cf_thrd_pool[i - 1], NULL);
                     cf_thrd_pool[i - 1] = (thrd_t) { 0 };
@@ -258,13 +310,18 @@ __attribute__((weak)) int main(int argc, char** argv) {
             continue;
     }
 
+    for (size_t t_idx = 0; t_idx < cf_num_targets; t_idx++) {
+        free(cf_targets[t_idx].attribs);
+    }
+
     return CF_SUCCESS_EC;
 }
 
-#define CF_TARGET(name_ident) \
+#define CF_TARGET(name_ident, ...) \
     static void cf_target_##name_ident(void); \
     __attribute__((constructor)) static void cf_target_reg_##name_ident(void) { \
-        cf_register_target(#name_ident, cf_target_##name_ident); \
+        const cf_attr_t attribs[] = { __VA_ARGS__ }; \
+        cf_register_target(#name_ident, cf_target_##name_ident, attribs, sizeof(attribs)/sizeof(cf_attr_t)); \
     } \
     static void cf_target_##name_ident(void)
 
@@ -275,9 +332,6 @@ __attribute__((weak)) int main(int argc, char** argv) {
         cf_register_config(#name_ident, cf_config_##name_ident); \
     } \
     static void cf_config_##name_ident(void)
-
-#define CF_DEPENDS_ON(name_ident) \
-    cf_depends_on(#name_ident);
 
 #define CF_GLOB(expr) \
     cf_glob(expr);
@@ -313,5 +367,13 @@ __attribute__((weak)) int main(int argc, char** argv) {
 
 #define CF_RUNP(format_str, ...) CF_INTERNAL_RUNNER(true, format_str, ##__VA_ARGS__)
 #define CF_RUN(format_str, ...) CF_INTERNAL_RUNNER(false, format_str, ##__VA_ARGS__)
+
+#define CF_DEPENDS(target_ident) \
+    (cf_attr_t) { \
+        .type = DEPENDENCY, \
+        .arg.depends = { \
+            .target_name = #target_ident \
+        } \
+    }
 
 #endif // CFORGE_H
