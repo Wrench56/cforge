@@ -104,7 +104,7 @@ static size_t cf_num_thrds = 0;
 static cf_state_t cf_state = REGISTER_PHASE;
 
 static size_t cf_find_target_index(const char* target_name) {
-    for (int i = cf_num_targets - 1; i >= 0; i--) {
+    for (size_t i = cf_num_targets; i-- > 0;) {
         if (strncmp(target_name, cf_targets[i].name, CF_MAX_NAME_LENGTH) == 0) {
             return i;
         }
@@ -129,14 +129,18 @@ static void cf_register_target(const char* name, cf_target_fn fn, const cf_attr_
         exit(CF_MAX_TARGETS_EC);
     }
 
+    void* attribs_block;
+    if (attribs_size > 0) {
+        attribs_block = malloc(attribs_size * sizeof(cf_attr_t));
+        if (attribs_block == NULL) {
+            CF_ERR_LOG("Error: malloc() failed in cf_register_target()\n");
+            exit(CF_CLIB_FAIL_EC);
+        }
 
-    void* attribs_block = malloc(attribs_size * sizeof(cf_attr_t));
-    if (attribs_block == NULL) {
-        CF_ERR_LOG("Error: malloc() failed in cf_register_target()\n");
-        exit(CF_CLIB_FAIL_EC);
+        memcpy(attribs_block, attribs, attribs_size * sizeof(cf_attr_t));
+    } else {
+        attribs_block = NULL;
     }
-
-    memcpy(attribs_block, attribs, attribs_size * sizeof(cf_attr_t));
 
     cf_targets[cf_num_targets++] = (cf_target_decl_t) {
         .name = name,
@@ -164,7 +168,7 @@ static void cf_dfs_execute(cf_target_decl_t* target) {
 
         const char* dep_target_name = attrib->arg.depends.target_name;
         size_t dep_idx = cf_find_target_index(dep_target_name);
-        if (dep_idx > CF_MAX_TARGETS) {
+        if (dep_idx >= cf_num_targets) {
             CF_ERR_LOG("Error: Target \"%s\" not found!\n", dep_target_name);
             exit(CF_TARGET_NOT_FOUND_EC);
         }
@@ -293,9 +297,9 @@ __attribute__((weak)) int main(int argc, char** argv) {
                 }
                 cf_dfs_execute(target);
                 cf_free_glob(cf_num_globs);
-                for (size_t i = cf_num_thrds; i > 0; i--) {
-                    thrd_join(cf_thrd_pool[i - 1], NULL);
-                    cf_thrd_pool[i - 1] = (thrd_t) { 0 };
+                for (size_t t = cf_num_thrds; t > 0; t--) {
+                    thrd_join(cf_thrd_pool[t - 1], NULL);
+                    cf_thrd_pool[t - 1] = (thrd_t) { 0 };
                 }
 
                 cf_num_thrds = 0;
