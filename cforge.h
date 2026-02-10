@@ -264,23 +264,22 @@ static void cf_setenv_wrapper(const char* ident, char* value) {
             .value = NULL,
             .was_set = false
         };
-        goto set_env;
+    } else {
+
+        char* value_block = (char*) malloc(strlen(envvar) + 1);
+        if (value_block == NULL) {
+            CF_ERR_LOG("Error: malloc() failed in cf_setenv_wrapper()\n");
+            exit(CF_CLIB_FAIL_EC);
+        }
+
+        strcpy(value_block, envvar);
+        cf_envs[cf_num_envs++] = (cf_env_restore_t) {
+            .envname = ident,
+            .value = value_block,
+            .was_set = true
+        };
     }
 
-    char* value_block = malloc(strlen(envvar) + 1);
-    if (value_block == NULL) {
-        CF_ERR_LOG("Error: malloc() failed in cf_setenv_wrapper()\n");
-        exit(CF_CLIB_FAIL_EC);
-    }
-
-    strcpy(value_block, envvar);
-    cf_envs[cf_num_envs++] = (cf_env_restore_t) {
-        .envname = ident,
-        .value = value_block,
-        .was_set = true
-    };
-
-set_env:
     if (setenv(ident, value, 1) != 0) {
         CF_ERR_LOG("Error: setenv() failed in cf_setenv_wrapper()\n");
         exit(CF_CLIB_FAIL_EC);
