@@ -187,7 +187,7 @@ static void cf_register_config(const char* name, cf_config_fn fn) {
         exit(CF_NAME_TOO_LONG_EC);
     }
 
-    if (cf_num_targets >= CF_MAX_TARGETS) {
+    if (cf_num_configs >= CF_MAX_CONFIGS) {
         CF_ERR_LOG("Error: Maximum configs of %d was reached!\n", CF_MAX_CONFIGS);
         exit(CF_MAX_CONFIGS_EC);
     }
