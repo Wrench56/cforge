@@ -14,11 +14,16 @@ exit 0
 #include <stdio.h>
 #include <string.h>
 
+/* TODO: Add other threading implementations (pthreads, fork, WinAPI) */
+#include <threads.h>
+
 #define CF_MAX_TARGETS 64
 #define CF_MAX_CONFIGS 64
 #define CF_MAX_GLOBS 64
+#define CF_MAX_THRDS 16
 
 #define CF_MAX_NAME_LENGTH 127
+#define CF_MAX_COMMAND_LENGTH 1 * 1024
 
 #define CF_ERR_LOG(...) fprintf(stderr, __VA_ARGS__)
 #define CF_WRN_LOG(...) fprintf(stdout, __VA_ARGS__)
@@ -31,6 +36,8 @@ exit 0
 #define CF_NAME_TOO_LONG_EC 5
 #define CF_CLIB_FAIL_EC 6
 #define CF_MAX_GLOBS_EC 7
+#define CF_MAX_COMMAND_LENGTH_EC 8
+#define CF_MAX_THRDS_EC 9
 
 typedef void (*cf_target_fn)(void);
 typedef void (*cf_config_fn)(void);
@@ -65,6 +72,9 @@ static size_t cf_num_configs = 0;
 
 static glob_t cf_globs[CF_MAX_GLOBS] = { 0 };
 static size_t cf_num_globs = 0;
+
+static thrd_t cf_thrd_pool[CF_MAX_THRDS] = { 0 };
+static size_t cf_num_thrds = 0;
 
 static cf_state_t cf_state = REGISTER_PHASE;
 
@@ -170,6 +180,39 @@ static void cf_depends_on(const char* name) {
     exit(CF_TARGET_NOT_FOUND_EC);
 }
 
+static int cf_thrd_helper(void* args) {
+    if (system((char*) args) != 0) {
+        CF_ERR_LOG("Error: Executing command \"%s\" failed\n", (char*) args);
+        exit(CF_CLIB_FAIL_EC);
+    }
+    free(args);
+    return 0;
+}
+
+static void cf_execute_command(bool is_parallel, char* buffer) {
+    if (is_parallel) {
+        if (cf_num_thrds >= CF_MAX_THRDS) {
+            CF_ERR_LOG("Error: Maximum threads of %d was reached!\n", CF_MAX_THRDS);
+            exit(CF_MAX_THRDS_EC);
+        }
+
+        thrd_t worker_thread;
+        if (thrd_create(&worker_thread, &cf_thrd_helper, (void*) buffer) != thrd_success) {
+            CF_ERR_LOG("Error: Thread failed during creation in cf_execute_command()\n");
+            exit(CF_CLIB_FAIL_EC);
+        }
+
+        cf_thrd_pool[cf_num_thrds++] = worker_thread;
+        return;
+    }
+
+    if (system(buffer) != 0) {
+        CF_ERR_LOG("Error: Executing command \"%s\" failed", (char*) buffer);
+        exit(CF_CLIB_FAIL_EC);
+    }
+    free(buffer);
+}
+
 __attribute__((weak)) int main(int argc, char** argv) {
     (void) cf_register_config;
     (void) cf_register_target;
@@ -197,6 +240,13 @@ __attribute__((weak)) int main(int argc, char** argv) {
                 target->executed = true;
                 target->fn();
                 cf_free_glob(cf_num_globs);
+                /* TODO: Introduces all kinds of issues unless I fix dependency resolution */
+                for (size_t i = cf_num_thrds; i > 0; i--) {
+                    thrd_join(cf_thrd_pool[i - 1], NULL);
+                    cf_thrd_pool[i - 1] = (thrd_t) { 0 };
+                }
+
+                cf_num_thrds = 0;
                 goto next_iter;
             }
         }
@@ -242,5 +292,26 @@ __attribute__((weak)) int main(int argc, char** argv) {
         }; \
         cf_free_glob(cf_num_globs - cf_saved_glob_frame_##filename); \
     } while (0);
+
+#define CF_INTERNAL_RUNNER(parallel, format_str, ...) \
+    do { \
+        char* buffer = malloc(CF_MAX_COMMAND_LENGTH); \
+        if (buffer == NULL) { \
+            CF_ERR_LOG("Error: malloc() failed in CF_INTERNAL_RUNNER\n"); \
+            exit(CF_CLIB_FAIL_EC); \
+        } \
+        int n = snprintf(buffer, CF_MAX_COMMAND_LENGTH, format_str, ##__VA_ARGS__); \
+        if (n < 0) { \
+            CF_ERR_LOG("Error: snprintf() failed in CF_INTERNAL_RUNNER\n"); \
+            exit(CF_CLIB_FAIL_EC); \
+        }else if (n >= CF_MAX_COMMAND_LENGTH) { \
+            CF_ERR_LOG("Error: Maximum command length of %d was reached!\n", CF_MAX_COMMAND_LENGTH); \
+            exit(CF_MAX_COMMAND_LENGTH_EC); \
+        } \
+        cf_execute_command(parallel, buffer); \
+    } while (0);
+
+#define CF_RUNP(format_str, ...) CF_INTERNAL_RUNNER(true, format_str, ##__VA_ARGS__)
+#define CF_RUN(format_str, ...) CF_INTERNAL_RUNNER(false, format_str, ##__VA_ARGS__)
 
 #endif // CFORGE_H
