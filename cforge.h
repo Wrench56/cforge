@@ -84,9 +84,8 @@ typedef struct {
 
 typedef enum {
     REGISTER_PHASE = 0,
-    CONFIG_CONSTRUCT_PHASE = 1,
-    TARGET_PLAN_PHASE = 2,
-    TARGET_EXECUTE_PHASE = 3,
+    TARGET_PLAN_PHASE = 1,
+    TARGET_EXECUTE_PHASE = 2,
 } cf_state_t;
 
 static cf_target_decl_t cf_targets[CF_MAX_TARGETS] = { 0 };
@@ -281,11 +280,6 @@ __attribute__((weak)) int main(int argc, char** argv) {
         return CF_SUCCESS_EC;
     }
 
-    cf_state = CONFIG_CONSTRUCT_PHASE;
-    for (size_t i = 0; i < cf_num_configs; i++) {
-        cf_configs[i].fn();
-    }
-
     cf_state = TARGET_EXECUTE_PHASE;
     for (int32_t i = 1; i < argc; i++) {
         for (size_t j = 0; j < cf_num_targets; j++) {
@@ -379,5 +373,8 @@ __attribute__((weak)) int main(int argc, char** argv) {
             .target_name = #target_ident \
         } \
     }
+
+#define CF_SET_ENV(ident, value) setenv(#ident, value, 1);
+#define CF_ENV(ident) getenv(#ident)
 
 #endif // CFORGE_H
