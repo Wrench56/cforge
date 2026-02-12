@@ -1,8 +1,10 @@
+#define _POSIX_C_SOURCE 200809L
+
 #ifndef CFORGE_H
 #define CFORGE_H
 
 #if 0
-cc -O2 -Wall -Wextra -Wshadow -Wpedantic -Wconversion -Wstrict-prototypes -Wformat=2 -Wmissing-prototypes -Wold-style-definition -Wdouble-promotion -Wno-unused-parameter "cforge.c" -o "./.b" && exec "./.b" "$@"
+cc -O2 -Wall -Wextra -Wshadow -Wpedantic -Wconversion -Wstrict-prototypes -Wformat=2 -Wmissing-prototypes -Wold-style-definition -Wdouble-promotion -Wno-unused-parameter -std=c11 "cforge.c" -o "./.b" && exec "./.b" "$@"
 exit 0
 #endif
 
