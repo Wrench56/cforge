@@ -2,7 +2,7 @@
 #define CFORGE_H
 
 #if 0
-cc -O2 -Wall -Wextra "cforge.c" -o "./.b" && exec "./.b" "$@"
+cc -O2 -Wall -Wextra -Wshadow -Wpedantic -Wconversion -Wstrict-prototypes -Wformat=2 -Wmissing-prototypes -Wold-style-definition -Wdouble-promotion -Wno-unused-parameter "cforge.c" -o "./.b" && exec "./.b" "$@"
 exit 0
 #endif
 
@@ -320,7 +320,7 @@ static void cf_restore_env(size_t env_checkpoint) {
 
 static cf_glob_t cf_glob(const char* expr) {
     glob_t glob_res = { 0 };
-    uint32_t rc = glob(expr, GLOB_NOSORT | GLOB_MARK | GLOB_NOESCAPE, NULL, &glob_res);
+    int32_t rc = glob(expr, GLOB_NOSORT | GLOB_MARK | GLOB_NOESCAPE, NULL, &glob_res);
     
     if (rc == GLOB_NOMATCH) {
         globfree(&glob_res);
@@ -374,10 +374,10 @@ static char* cf_join(char* strings[], char* separator, size_t length) {
     cf_jstrings[cf_num_jstrings++] = jstring;
 
     const char* endptr = jstring + CF_MAX_JOIN_STRING_LEN - 1;
-    char* cptr = stpncpy(jstring, strings[0], (endptr - jstring));
+    char* cptr = stpncpy(jstring, strings[0], (size_t) (endptr - jstring));
     for (size_t i = 1; i < length; i++) {
-        cptr = stpncpy(cptr, separator, (endptr - cptr));
-        cptr = stpncpy(cptr, strings[i], (endptr - cptr));
+        cptr = stpncpy(cptr, separator, (size_t) (endptr - cptr));
+        cptr = stpncpy(cptr, strings[i], (size_t) (endptr - cptr));
     }
 
     *cptr = '\0';
