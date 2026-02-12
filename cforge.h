@@ -22,6 +22,8 @@ exit 0
 #define CF_MAX_GLOBS 64
 #define CF_MAX_THRDS 16
 #define CF_MAX_ENVS 256
+#define CF_MAX_JOIN_STRINGS 256
+#define CF_MAX_JOIN_STRING_LEN 8196
 
 #define CF_MAX_NAME_LENGTH 127
 #define CF_MAX_COMMAND_LENGTH 1 * 1024
@@ -43,6 +45,7 @@ exit 0
 #define CF_CONFIG_NOT_FOUND_EC 11
 #define CF_UNKNOWN_ATTR_EC 12
 #define CF_MAX_ENVS_EC 13
+#define CF_MAX_JSTRINGS_EC 14
 
 typedef void (*cf_target_fn)(void);
 typedef void (*cf_config_fn)(void);
@@ -117,6 +120,9 @@ static size_t cf_num_thrds = 0;
 static cf_env_restore_t cf_envs[CF_MAX_ENVS] = { 0 };
 static size_t cf_num_envs = 0;
 
+static char* cf_jstrings[CF_MAX_JOIN_STRINGS] = { 0 };
+static size_t cf_num_jstrings = 0;
+
 static cf_state_t cf_state = REGISTER_PHASE;
 
 static size_t cf_find_target_index(const char* target_name) {
@@ -167,6 +173,7 @@ static void cf_register_target(const char* name, cf_target_fn fn, const cf_attr_
     };
 }
 
+static void cf_free_jstrings(size_t frame_size);
 static void cf_restore_env(size_t env_checkpoint);
 static void cf_dfs_execute(cf_target_decl_t* target) {
     if (target->node_status == DONE) {
@@ -224,7 +231,10 @@ next_attr:
     if (config != NULL) {
         config->fn();
     }
+
+    size_t saved_jstrings_frame = cf_num_jstrings;
     target->fn();
+    cf_free_jstrings(saved_jstrings_frame);
     cf_restore_env(env_checkpoint);
     target->node_status = DONE;
 }
@@ -265,7 +275,6 @@ static void cf_setenv_wrapper(const char* ident, char* value) {
             .was_set = false
         };
     } else {
-
         char* value_block = (char*) malloc(strlen(envvar) + 1);
         if (value_block == NULL) {
             CF_ERR_LOG("Error: malloc() failed in cf_setenv_wrapper()\n");
@@ -343,6 +352,42 @@ static void cf_free_glob(size_t frame_size) {
     }
 }
 
+static char* cf_join(char* strings[], char* separator, size_t length) {
+    if (length < 1) {
+        return (char*) "";
+    }
+
+    if (cf_num_jstrings >= CF_MAX_JOIN_STRINGS) {
+        CF_ERR_LOG("Error: Maximum joined strings of %d was reached!\n", CF_MAX_JOIN_STRINGS);
+        exit(CF_MAX_JSTRINGS_EC);
+    }
+
+    char* jstring = (char*) malloc(CF_MAX_JOIN_STRING_LEN);
+    if (jstring == NULL) {
+        CF_ERR_LOG("Error: malloc() failed in cf_join()\n");
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    cf_jstrings[cf_num_jstrings++] = jstring;
+
+    const char* endptr = jstring + CF_MAX_JOIN_STRING_LEN - 1;
+    char* cptr = stpncpy(jstring, strings[0], (endptr - jstring));
+    for (size_t i = 1; i < length; i++) {
+        cptr = stpncpy(cptr, separator, (endptr - cptr));
+        cptr = stpncpy(cptr, strings[i], (endptr - cptr));
+    }
+
+    *cptr = '\0';
+    return jstring;
+}
+
+static void cf_free_jstrings(size_t checkpoint) {
+    while (cf_num_jstrings > checkpoint) {
+        free(cf_jstrings[--cf_num_jstrings]);
+        cf_jstrings[cf_num_jstrings] = NULL;
+    }
+}
+
 static int cf_thrd_helper(void* args) {
     if (system((char*) args) != 0) {
         CF_ERR_LOG("Error: Executing command \"%s\" failed\n", (char*) args);
@@ -373,6 +418,7 @@ static void cf_execute_command(bool is_parallel, char* buffer) {
         CF_ERR_LOG("Error: Executing command \"%s\" failed", (char*) buffer);
         exit(CF_CLIB_FAIL_EC);
     }
+
     free(buffer);
 }
 
@@ -380,6 +426,7 @@ __attribute__((weak)) int main(int argc, char** argv) {
     (void) cf_register_config;
     (void) cf_register_target;
     (void) cf_glob;
+    (void) cf_join;
 
     if (argc == 1) {
         return CF_SUCCESS_EC;
@@ -396,6 +443,7 @@ __attribute__((weak)) int main(int argc, char** argv) {
                 }
                 cf_dfs_execute(target);
                 cf_free_glob(cf_num_globs);
+                cf_free_jstrings(cf_num_jstrings);
                 for (size_t t = cf_num_thrds; t > 0; t--) {
                     thrd_join(cf_thrd_pool[t - 1], NULL);
                     cf_thrd_pool[t - 1] = (thrd_t) { 0 };
