@@ -25,6 +25,7 @@ rules:
       - configs
       - core
       - parallel
+      - utils
   subject-empty:
     level: error
   type:
