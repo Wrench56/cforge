@@ -173,7 +173,8 @@ static void cf_register_target(const char* name, cf_target_fn fn, const cf_attr_
     };
 }
 
-static void cf_free_jstrings(size_t frame_size);
+static void cf_free_glob(size_t checkpoint);
+static void cf_free_jstrings(size_t checkpoint);
 static void cf_restore_env(size_t env_checkpoint);
 static void cf_dfs_execute(cf_target_decl_t* target) {
     if (target->node_status == DONE) {
@@ -232,9 +233,11 @@ next_attr:
         config->fn();
     }
 
-    size_t saved_jstrings_frame = cf_num_jstrings;
+    size_t glob_checkpoint = cf_num_globs;
+    size_t jstrings_checkpoint = cf_num_jstrings;
     target->fn();
-    cf_free_jstrings(saved_jstrings_frame);
+    cf_free_jstrings(jstrings_checkpoint);
+    cf_free_glob(glob_checkpoint);
     cf_restore_env(env_checkpoint);
     target->node_status = DONE;
 }
@@ -429,7 +432,7 @@ __attribute__((weak)) int main(int argc, char** argv) {
     (void) cf_join;
 
     if (argc == 1) {
-        return CF_SUCCESS_EC;
+        goto cleanup;
     }
 
     cf_state = TARGET_EXECUTE_PHASE;
@@ -459,6 +462,7 @@ __attribute__((weak)) int main(int argc, char** argv) {
             continue;
     }
 
+cleanup:
     for (size_t t_idx = 0; t_idx < cf_num_targets; t_idx++) {
         free(cf_targets[t_idx].attribs);
     }
