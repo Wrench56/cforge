@@ -25,10 +25,13 @@ exit 0
 #define CF_MAX_THRDS 16
 #define CF_MAX_ENVS 256
 #define CF_MAX_JOIN_STRINGS 256
-#define CF_MAX_JOIN_STRING_LEN 8196
+#define CF_MAX_MAP_ATTRS 8
+#define CF_MAX_MAPS 64
 
 #define CF_MAX_NAME_LENGTH 127
+#define CF_MAX_OUTSTR_LENGTH 511
 #define CF_MAX_COMMAND_LENGTH 1 * 1024
+#define CF_MAX_JOIN_STRING_LEN 8192
 
 #define CF_ERR_LOG(...) fprintf(stderr, __VA_ARGS__)
 #define CF_WRN_LOG(...) fprintf(stdout, __VA_ARGS__)
@@ -48,6 +51,8 @@ exit 0
 #define CF_UNKNOWN_ATTR_EC 12
 #define CF_MAX_ENVS_EC 13
 #define CF_MAX_JSTRINGS_EC 14
+#define CF_MAX_MAPS_EC 15
+#define CF_IMPOSSIBLE_EC 16
 
 typedef void (*cf_target_fn)(void);
 typedef void (*cf_config_fn)(void);
@@ -107,6 +112,29 @@ typedef enum {
     TARGET_EXECUTE_PHASE = 2,
 } cf_state_t;
 
+typedef enum {
+    MAP_UNKNOWN = 0,
+    MAP_EXT,
+    MAP_PARENT,
+} cf_map_attr_type_t;
+
+typedef struct {
+    cf_map_attr_type_t type;
+    union {
+        struct {
+            char* n_ext;
+        };
+        struct {
+            char* n_parent;
+        };
+    };
+} cf_map_attr_t;
+
+typedef struct {
+    char** oarray;
+    size_t size;
+} cf_map_entry_t;
+
 static cf_target_decl_t cf_targets[CF_MAX_TARGETS] = { 0 };
 static size_t cf_num_targets = 0;
 
@@ -124,6 +152,9 @@ static size_t cf_num_envs = 0;
 
 static char* cf_jstrings[CF_MAX_JOIN_STRINGS] = { 0 };
 static size_t cf_num_jstrings = 0;
+
+static cf_map_entry_t cf_maps[CF_MAX_MAPS] = { 0 };
+static size_t cf_num_maps = 0;
 
 static cf_state_t cf_state = REGISTER_PHASE;
 
@@ -175,6 +206,7 @@ static void cf_register_target(const char* name, cf_target_fn fn, const cf_attr_
     };
 }
 
+static void cf_free_maps(size_t checkpoint);
 static void cf_free_glob(size_t checkpoint);
 static void cf_free_jstrings(size_t checkpoint);
 static void cf_restore_env(size_t env_checkpoint);
@@ -237,7 +269,9 @@ next_attr:
 
     size_t glob_checkpoint = cf_num_globs;
     size_t jstrings_checkpoint = cf_num_jstrings;
+    size_t maps_checkpoint = cf_num_maps;
     target->fn();
+    cf_free_maps(maps_checkpoint);
     cf_free_jstrings(jstrings_checkpoint);
     cf_free_glob(glob_checkpoint);
     cf_restore_env(env_checkpoint);
@@ -393,6 +427,88 @@ static void cf_free_jstrings(size_t checkpoint) {
     }
 }
 
+static char** cf_map(const char** sources, size_t src_length, cf_map_attr_t* attrs, size_t attr_length) {
+    if (cf_num_maps >= CF_MAX_MAPS) {
+        CF_ERR_LOG("Error: Maximum maps of %d was reached!\n", CF_MAX_MAPS);
+        exit(CF_MAX_MAPS_EC);
+    }
+    
+    
+    char** oarray = (char**) malloc(src_length * sizeof(char*));
+    if (oarray == NULL) {
+        CF_ERR_LOG("Error: malloc() failed in cf_map()\n");
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    cf_maps[cf_num_maps++] = (cf_map_entry_t) {
+        .oarray = oarray,
+        .size = src_length
+    };
+
+    size_t oarray_idx = 0;
+    for (size_t i = 0; i < src_length; i++) {
+        char* outstr = (char*) malloc(CF_MAX_OUTSTR_LENGTH);
+        if (outstr == NULL) {
+            CF_ERR_LOG("Error: malloc() failed for outstr in cf_map()\n");
+            exit(CF_CLIB_FAIL_EC);
+        }
+
+        strcpy(outstr, sources[i]);
+        if (oarray_idx >= src_length) {
+            CF_ERR_LOG("Error: Impossible error in cf_map()\n");
+            exit(CF_IMPOSSIBLE_EC);
+        }
+
+        for (size_t j = 0; j < attr_length; j++) {
+            cf_map_attr_t attr = attrs[j];
+            switch (attr.type) {
+                case MAP_EXT: {
+                    const char* dot = strrchr(outstr, '.');
+                    size_t length = (size_t) (dot - outstr + 1);
+                    memcpy(outstr + length, attr.n_ext, strlen(attr.n_ext));
+                    outstr[length + strlen(attr.n_ext)] = '\0';
+                    break;
+                }
+                case MAP_PARENT: {
+                    /* TODO: Sanitize Windows path... */
+                    const char* slash = strchr(outstr, '/');
+                    if (slash == NULL) {
+                        CF_WRN_LOG("Warning: No parent directory to replace in cf_map()\n");
+                        break;
+                    }
+
+                    size_t length = strlen(attr.n_parent);
+                    memmove(outstr + length, slash, strlen(slash) + 1);
+                    memcpy(outstr, attr.n_parent, length);
+                    break;
+                }
+                case MAP_UNKNOWN: {
+                    CF_ERR_LOG("Error: MAP_UNKNOWN attribute detected!");
+                    exit(CF_UNKNOWN_ATTR_EC);
+                }
+            }
+         }
+
+        oarray[oarray_idx++] = outstr;
+    }
+
+    return oarray;
+}
+
+static void cf_free_maps(size_t checkpoint) {
+    while (cf_num_maps > checkpoint) {
+        cf_map_entry_t entry = cf_maps[--cf_num_maps];
+        size_t rem_elems = entry.size;
+        while (rem_elems > 0) {
+            free(entry.oarray[--rem_elems]);
+        }
+
+        free(entry.oarray);
+        cf_maps[cf_num_maps] = (cf_map_entry_t) { 0 };
+    }
+
+}
+
 static int cf_thrd_helper(void* args) {
     if (system((char*) args) != 0) {
         CF_ERR_LOG("Error: Executing command \"%s\" failed\n", (char*) args);
@@ -541,5 +657,23 @@ cleanup:
 
 #define CF_SET_ENV(ident, value) cf_setenv_wrapper(#ident, value);
 #define CF_ENV(ident) getenv(#ident)
+
+#define CF_MAPA(sources, len, ...) \
+    cf_map(sources, len, (cf_map_attr_t[]) { __VA_ARGS__ }, (sizeof((cf_map_attr_t[]) { __VA_ARGS__ })/sizeof(cf_map_attr_t)))
+
+#define CF_MAP(source, ...) \
+    CF_MAPA((const char*[]) { source }, 1, __VA_ARGS__)[0]
+
+#define CF_MAP_EXT(new_ext) \
+    (cf_map_attr_t) { \
+        .type = MAP_EXT, \
+        .n_ext = new_ext \
+    }
+
+#define CF_MAP_PARENT(new_parent) \
+    (cf_map_attr_t) { \
+        .type = MAP_PARENT, \
+        .n_parent = new_parent \
+    }
 
 #endif // CFORGE_H
