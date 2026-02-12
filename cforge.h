@@ -345,8 +345,8 @@ static cf_glob_t cf_glob(const char* expr) {
     };
 }
 
-static void cf_free_glob(size_t frame_size) {
-    for (size_t i = frame_size; i > 0 && cf_num_globs > 0; i--) {
+static void cf_free_glob(size_t checkpoint) {
+    while (cf_num_globs > checkpoint) {
         globfree(&cf_globs[--cf_num_globs]);
         cf_globs[cf_num_globs] = (glob_t) { 0 };
     }
@@ -442,8 +442,6 @@ __attribute__((weak)) int main(int argc, char** argv) {
                     goto next_iter;
                 }
                 cf_dfs_execute(target);
-                cf_free_glob(cf_num_globs);
-                cf_free_jstrings(cf_num_jstrings);
                 for (size_t t = cf_num_thrds; t > 0; t--) {
                     thrd_join(cf_thrd_pool[t - 1], NULL);
                     cf_thrd_pool[t - 1] = (thrd_t) { 0 };
@@ -489,13 +487,13 @@ __attribute__((weak)) int main(int argc, char** argv) {
 
 #define CF_GLOB_FOREACH(expr, filename, ...) \
     do { \
-        size_t cf_saved_glob_frame_##filename = cf_num_globs; \
+        size_t cf_saved_glob_checkpoint_##filename = cf_num_globs; \
         cf_glob_t cf_glob_ret = cf_glob(expr); \
         for (size_t idx_##filename = 0; idx_##filename < cf_glob_ret.c; idx_##filename++) { \
             const char* filename = cf_glob_ret.p[idx_##filename]; \
             __VA_ARGS__ \
         }; \
-        cf_free_glob(cf_num_globs - cf_saved_glob_frame_##filename); \
+        cf_free_glob(cf_saved_glob_checkpoint_##filename); \
     } while (0);
 
 #define CF_INTERNAL_RUNNER(parallel, format_str, ...) \
