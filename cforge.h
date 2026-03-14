@@ -28,6 +28,9 @@ exit 0
 #define CF_MAX_MAP_ATTRS 8
 #define CF_MAX_MAPS 64
 
+#define CF_MAGIC_HEADER_VALUE 0xCFDB
+#define CF_DB_CVERSION 0x1
+
 #define CF_MAX_NAME_LENGTH 127
 #define CF_MAX_OUTSTR_LENGTH 511
 #define CF_MAX_COMMAND_LENGTH 1 * 1024
@@ -53,6 +56,9 @@ exit 0
 #define CF_MAX_JSTRINGS_EC 14
 #define CF_MAX_MAPS_EC 15
 #define CF_IMPOSSIBLE_EC 16
+#define CF_DB_IO_FAIL 17
+#define CF_DB_MAGIC_FAIL 18
+#define CF_DB_VERSION_FAIL 19
 
 typedef void (*cf_target_fn)(void);
 typedef void (*cf_config_fn)(void);
@@ -105,6 +111,33 @@ typedef struct {
     size_t c;
     char** p;
 } cf_glob_t;
+
+typedef struct {
+    /* Magic header should be CFDB */
+    uint32_t magic_header;
+    uint16_t version;
+    uint16_t reserved;
+    size_t entry_cnt;
+    size_t string_sz;
+} cf_db_hdr_t __attribute__((aligned(8)));
+
+typedef struct {
+    uint64_t hash;
+    uint64_t mtime;
+    size_t size;
+    size_t path_offset;
+} cf_db_entry_t __attribute__((aligned(8)));
+
+typedef struct {
+    size_t len;
+    char* string;
+} cf_db_lstring_t;
+
+typedef struct {
+    cf_db_hdr_t* header;
+    cf_db_entry_t* entries;
+    cf_db_lstring_t* strings;
+} cf_db_mem_t;
 
 typedef enum {
     REGISTER_PHASE = 0,
@@ -543,49 +576,185 @@ static void cf_execute_command(bool is_parallel, char* buffer) {
     free(buffer);
 }
 
-__attribute__((weak)) int main(int argc, char** argv) {
-    (void) cf_register_config;
-    (void) cf_register_target;
-    (void) cf_glob;
-    (void) cf_join;
+/* CForge DB implementation */
+static void cf_db_free(cf_db_mem_t* db) {
+    if (db == NULL) {
+        return;
+    }
 
-    if (argc == 1) {
+    cf_db_hdr_t* hdr = db->header;
+    if (hdr != NULL) {
+        free(hdr);
+        db->header = NULL;
+    }
+
+    cf_db_entry_t* entries = db->entries;
+    if (entries != NULL) {
+        free(entries);
+        db->entries = NULL;
+    }
+
+    cf_db_lstring_t* strings = db->strings;
+    if (strings != NULL) {
+        free(strings);
+        db->strings = NULL;
+    }
+
+    free(db);
+}
+
+static cf_db_mem_t* cf_db_load(const char* db_path) {
+    FILE* fp = fopen(db_path, "rb");
+
+    cf_db_mem_t* db = (cf_db_mem_t*) malloc(sizeof(cf_db_mem_t));
+    memset(db, 0, sizeof(cf_db_mem_t));
+
+    cf_db_hdr_t* hdr = (cf_db_hdr_t*) malloc(sizeof(cf_db_hdr_t));
+    if (db == NULL || hdr == NULL) {
+        CF_ERR_LOG("Error: malloc() failed in cf_load_db() for db_mem\n");
+        if (fp != NULL) {
+            fclose(fp);
+        }
+        cf_db_free(db);
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    db->header = hdr;
+
+    /* Default when DB not found */
+    if (fp == NULL) {
+        CF_WRN_LOG("Warning: DB at path not found, using default\n");
+        hdr->magic_header = CF_MAGIC_HEADER_VALUE;
+        hdr->version = CF_DB_CVERSION;
+        hdr->reserved = 0;
+        hdr->entry_cnt = 0;
+        hdr->string_sz = 0;
+        db->entries = NULL;
+        db->strings = NULL;
+        return db;
+    }
+
+    if (fread(hdr, sizeof(cf_db_hdr_t), 1, fp) != 1) {
+        CF_ERR_LOG("Error: Could not read database header\n");   
+        fclose(fp);
+        cf_db_free(db);
+        exit(CF_DB_IO_FAIL);
+    }
+
+    if (hdr->magic_header != CF_MAGIC_HEADER_VALUE) {
+        CF_ERR_LOG("Error: Magic database header code is invalid!\n");
+        fclose(fp);
+        cf_db_free(db);
+        exit(CF_DB_MAGIC_FAIL);
+    }
+
+    if (hdr->version != CF_DB_CVERSION) {
+        CF_ERR_LOG("Error: CForge version (v%d) does not match database version (v%d)\n", CF_DB_CVERSION, hdr->version);
+        fclose(fp);
+        cf_db_free(db);
+        exit(CF_DB_VERSION_FAIL);
+    }
+
+    size_t entries_sz = hdr->entry_cnt * sizeof(cf_db_entry_t);
+    cf_db_entry_t* entries = (cf_db_entry_t*) malloc(entries_sz);
+    if (entries == NULL) {
+        CF_ERR_LOG("Error: malloc() failed in cf_load_db() for entries\n");
+        fclose(fp);
+        cf_db_free(db);
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    if (fread(entries, sizeof(cf_db_entry_t), hdr->entry_cnt, fp) != entries_sz) {  
+        CF_ERR_LOG("Error: Could not read database entries\n");
+        fclose(fp);
+        cf_db_free(db);
+        exit(CF_DB_IO_FAIL);
+    }
+
+    cf_db_lstring_t* strings = (cf_db_lstring_t*) malloc(hdr->string_sz);
+    if (strings == NULL) {
+        CF_ERR_LOG("Error: malloc() failed in cf_load_db() for strings\n");
+        fclose(fp);
+        cf_db_free(db);
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    if (fread(entries, 1, hdr->string_sz, fp) != hdr->string_sz) {  
+        CF_ERR_LOG("Error: Could not read database entries\n");
+        fclose(fp);
+        cf_db_free(db);
+        exit(CF_DB_IO_FAIL);
+    }
+    
+    db->entries = entries;
+    fclose(fp);
+    return db;
+}
+
+static void cf_db_save(const char* db_path, cf_db_mem_t* db) {
+    if (db == NULL) {
+        CF_ERR_LOG("Error: db passed to cf_save_db() is NULL");
+        return;
+    }
+
+    FILE* fp = fopen(db_path, "wb");
+    if (fp == NULL) {
+        CF_ERR_LOG("Error: Could not open database file\n");
+        cf_db_free(db);
+        exit(CF_DB_IO_FAIL);
+    }
+
+    cf_db_hdr_t* hdr = db->header;
+    if(fwrite(hdr, sizeof(cf_db_hdr_t), 1, fp) != 1) {
+        CF_ERR_LOG("Error: Could not write database header\n");
+        fclose(fp);
+        cf_db_free(db);
+        exit(CF_DB_IO_FAIL);
+    }
+
+    if (db->entries == NULL) {
+        goto save_strings;
+    }
+    
+    if (fwrite(db->entries, sizeof(cf_db_entry_t), hdr->entry_cnt, fp) != hdr->entry_cnt) {
+        CF_ERR_LOG("Error: Could not write database entries\n");
+        fclose(fp);
+        cf_db_free(db);
+        exit(CF_DB_IO_FAIL);
+    }
+
+save_strings:
+    if (db->strings == NULL) {
         goto cleanup;
     }
 
-    cf_state = TARGET_EXECUTE_PHASE;
-    for (int32_t i = 1; i < argc; i++) {
-        for (size_t j = 0; j < cf_num_targets; j++) {
-            cf_target_decl_t* target = &cf_targets[j];
-            if (strcmp(target->name, argv[i]) == 0) {
-                if (target->node_status == DONE) {
-                    CF_WRN_LOG("Warning: Target \"%s\" was executed already! Skipping target...\n", argv[i]);
-                    goto next_iter;
-                }
-                cf_dfs_execute(target);
-                for (size_t t = cf_num_thrds; t > 0; t--) {
-                    thrd_join(cf_thrd_pool[t - 1], NULL);
-                    cf_thrd_pool[t - 1] = (thrd_t) { 0 };
-                }
-
-                cf_num_thrds = 0;
-                goto next_iter;
-            }
-        }
-
-        CF_ERR_LOG("Error: Target \"%s\" not found!\n", argv[i]);
-        return CF_TARGET_NOT_FOUND_EC;
-
-        next_iter:
-            continue;
+    /* TODO: Update to be able to add new strings */
+    if (fwrite(db->strings, 1, hdr->string_sz, fp) != hdr->string_sz) {
+        CF_ERR_LOG("Error: Could not write database strings\n");
+        fclose(fp);
+        cf_db_free(db);
+        exit(CF_DB_IO_FAIL);
     }
 
 cleanup:
-    for (size_t t_idx = 0; t_idx < cf_num_targets; t_idx++) {
-        free(cf_targets[t_idx].attribs);
+    fclose(fp);
+    cf_db_free(db);
+}
+
+static cf_db_entry_t* cf_db_find(uint64_t hash, char* path, cf_db_mem_t* db) {
+    for (size_t i = 0; i < db->header->entry_cnt; i++) {
+        cf_db_entry_t entry = db->entries[i];
+        if (hash == entry.hash) {
+            cf_db_lstring_t lstring = db->strings[entry.path_offset];
+            if (strncmp(path, lstring.string, lstring.len)) {
+                return &db->entries[i];
+            } else {
+                CF_WRN_LOG("Warning: Collision detected!\n");
+            }
+        }
     }
 
-    return CF_SUCCESS_EC;
+    return NULL;
 }
 
 /* Compact XXH64 implementation */
@@ -663,6 +832,55 @@ uint64_t xxh64(const uint8_t* data, size_t len, uint64_t seed) {
     h ^= h >> 32;
     return h;
 }
+
+__attribute__((weak)) int main(int argc, char** argv) {
+    (void) cf_register_config;
+    (void) cf_register_target;
+    (void) cf_glob;
+    (void) cf_join;
+
+    if (argc == 1) {
+        goto cleanup;
+    }
+
+    cf_db_mem_t* db = cf_db_load(".cforge.db");
+    cf_state = TARGET_EXECUTE_PHASE;
+    for (int32_t i = 1; i < argc; i++) {
+        for (size_t j = 0; j < cf_num_targets; j++) {
+            cf_target_decl_t* target = &cf_targets[j];
+            if (strcmp(target->name, argv[i]) == 0) {
+                if (target->node_status == DONE) {
+                    CF_WRN_LOG("Warning: Target \"%s\" was executed already! Skipping target...\n", argv[i]);
+                    goto next_iter;
+                }
+                cf_dfs_execute(target);
+                for (size_t t = cf_num_thrds; t > 0; t--) {
+                    thrd_join(cf_thrd_pool[t - 1], NULL);
+                    cf_thrd_pool[t - 1] = (thrd_t) { 0 };
+                }
+
+                cf_num_thrds = 0;
+                goto next_iter;
+            }
+        }
+
+        CF_ERR_LOG("Error: Target \"%s\" not found!\n", argv[i]);
+        return CF_TARGET_NOT_FOUND_EC;
+
+        next_iter:
+            continue;
+    }
+
+    cf_db_save(".cforge.db", db);
+
+cleanup:
+    for (size_t t_idx = 0; t_idx < cf_num_targets; t_idx++) {
+        free(cf_targets[t_idx].attribs);
+    }
+
+    return CF_SUCCESS_EC;
+}
+
 
 #define CF_TARGET(name_ident, ...) \
     static void cf_target_##name_ident(void); \
