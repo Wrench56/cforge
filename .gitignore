@@ -4,8 +4,9 @@
 # Ignore cforge.c test script
 ./cforge.c
 
-# Ignore cforge executable
+# Ignore cforge executable and database
 .b
+.cforge.db
 
 # Ignore playground/ directory
 playground/
