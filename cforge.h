@@ -17,8 +17,16 @@ exit 0
 #include <stdio.h>
 #include <string.h>
 
+/* TODO: Port this to Windows someday */
+#include <sys/stat.h>
+
 /* TODO: Add other threading implementations (pthreads, fork, WinAPI) */
 #include <threads.h>
+
+/* TODO: Port this environment variable system to Windows */
+extern char** environ;
+uint64_t denv_hash = 0;
+uint64_t cenv_hash = 0;
 
 #define CF_MAX_TARGETS 64
 #define CF_MAX_CONFIGS 64
@@ -30,7 +38,7 @@ exit 0
 #define CF_MAX_MAPS 64
 
 #define CF_MAGIC_HEADER_VALUE 0xCFDB
-#define CF_DB_CVERSION 0x1
+#define CF_DB_CVERSION 0x2
 
 #define CF_MAX_NAME_LENGTH 127
 #define CF_MAX_OUTSTR_LENGTH 511
@@ -123,10 +131,13 @@ typedef struct {
 } cf_db_hdr_t __attribute__((aligned(8)));
 
 typedef struct {
-    uint64_t hash;
+    uint64_t path_hash;
+    uint64_t env_hash;
+    uint64_t content_hash;
     uint64_t mtime;
     size_t size;
     size_t path_offset;
+    void* target;
 } cf_db_entry_t __attribute__((aligned(8)));
 
 typedef struct {
@@ -139,6 +150,8 @@ typedef struct {
     cf_db_entry_t* entries;
     cf_db_lstring_t* strings;
 } cf_db_mem_t;
+
+static cf_db_mem_t* global_db = NULL;
 
 typedef enum {
     REGISTER_PHASE = 0,
@@ -240,6 +253,7 @@ static void cf_register_target(const char* name, cf_target_fn fn, const cf_attr_
     };
 }
 
+uint64_t xxh64(uint8_t* data, size_t len, uint64_t seed);
 static void cf_free_maps(size_t checkpoint);
 static void cf_free_glob(size_t checkpoint);
 static void cf_free_jstrings(size_t checkpoint);
@@ -300,6 +314,9 @@ next_attr:
     if (config != NULL) {
         config->fn();
     }
+
+    size_t environ_len = strlen(*environ);
+    cenv_hash = xxh64((uint8_t*) *environ, environ_len, 0);
 
     size_t glob_checkpoint = cf_num_globs;
     size_t jstrings_checkpoint = cf_num_jstrings;
@@ -742,20 +759,84 @@ cleanup:
     cf_db_free(db);
 }
 
-static cf_db_entry_t* cf_db_find(uint64_t hash, char* path, cf_db_mem_t* db) {
+static cf_db_entry_t* cf_db_find(char* path, cf_db_mem_t* db) {
+    size_t plen = strlen(path);
+    uint64_t hash = xxh64((uint8_t*) path, plen, 0);
     for (size_t i = 0; i < db->header->entry_cnt; i++) {
         cf_db_entry_t entry = db->entries[i];
-        if (hash == entry.hash) {
+        if (hash == entry.path_hash) {
             cf_db_lstring_t lstring = db->strings[entry.path_offset];
             if (strncmp(path, lstring.string, lstring.len)) {
                 return &db->entries[i];
             } else {
-                CF_WRN_LOG("Warning: Collision detected!\n");
+                CF_WRN_LOG("Warning: Path hash collision detected!\n");
             }
         }
     }
 
     return NULL;
+}
+
+static bool cf_file_utd(char* path) {
+    cf_db_entry_t* entry = cf_db_find(path, global_db);
+    if (entry == NULL) {
+        return false;
+    }
+
+    struct stat st;
+    if (stat(path, &st) == -1) {
+        return false;
+    }
+
+    if (entry->size != (size_t) st.st_size) {
+        return false;
+    }
+
+    if (entry->mtime != (size_t) st.st_mtim.tv_nsec) {
+        return false;
+    }
+
+    if (cenv_hash != entry->env_hash) {
+        return false;
+    }
+
+    /* TODO: Optimize the above so that this never has to run */
+    FILE* fp = fopen(path, "rb");
+    if (fp == NULL) {
+        return false;
+    }
+
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return false;
+    }
+
+    ssize_t sz = ftell(fp);
+    if (sz < 0) {
+        fclose(fp);
+        return false;
+    }
+
+    rewind(fp);
+    uint8_t* buf = (uint8_t*) malloc((size_t) sz);
+    if (buf == NULL) {
+        CF_ERR_LOG("Error: malloc() failed in cf_file_utd()\n"); \
+        exit(CF_CLIB_FAIL_EC); \
+    }
+
+    if (fread(buf, 1, (size_t) sz, fp) != (size_t) sz) {
+        fclose(fp);
+        free(buf);
+        return false;
+    }
+
+    fclose(fp);
+    buf[sz] = '\0';
+    if (xxh64(buf, (size_t) sz, 0) != entry->content_hash) {
+        return false;
+    }
+
+    return true;
 }
 
 /* Compact XXH64 implementation */
@@ -785,9 +866,9 @@ static inline uint64_t xxh64_round(uint64_t acc, uint64_t input) {
     return xxh64_rotl(acc + input * XXH64_P2, 31) * XXH64_P1;
 }
 
-uint64_t xxh64(const uint8_t* data, size_t len, uint64_t seed) {
-    const uint8_t* p = data;
-    const uint8_t *end = p + len;
+uint64_t xxh64(uint8_t* data, size_t len, uint64_t seed) {
+    uint8_t* p = data;
+    uint8_t *end = p + len;
     uint64_t h;
 
     if (len >= 32) {
@@ -844,7 +925,10 @@ __attribute__((weak)) int main(int argc, char** argv) {
         goto cleanup;
     }
 
-    cf_db_mem_t* db = cf_db_load(".cforge.db");
+    global_db = cf_db_load(".cforge.db");
+    size_t environ_len = strlen(*environ);
+    denv_hash = xxh64((uint8_t*) *environ, environ_len, 0);
+
     cf_state = TARGET_EXECUTE_PHASE;
     for (int32_t i = 1; i < argc; i++) {
         for (size_t j = 0; j < cf_num_targets; j++) {
@@ -872,7 +956,7 @@ __attribute__((weak)) int main(int argc, char** argv) {
             continue;
     }
 
-    cf_db_save(".cforge.db", db);
+    cf_db_save(".cforge.db", global_db);
 
 cleanup:
     for (size_t t_idx = 0; t_idx < cf_num_targets; t_idx++) {
@@ -970,5 +1054,11 @@ cleanup:
         .type = MAP_PARENT, \
         .n_parent = new_parent \
     }
+
+#define CF_FILE_UTD(filepath) \
+    (cf_file_utd((char*) filepath))
+
+#define CF_FILE_NOT_UTD(filepath) \
+    (!cf_file_utd((char*) filepath))
 
 #endif // CFORGE_H
