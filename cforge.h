@@ -986,16 +986,29 @@ cleanup:
 #define CF_GLOB(expr) \
     cf_glob(expr);
 
-#define CF_GLOB_FOREACH(expr, filename, ...) \
-    do { \
-        size_t cf_saved_glob_checkpoint_##filename = cf_num_globs; \
-        cf_glob_t cf_glob_ret = cf_glob(expr); \
-        for (size_t idx_##filename = 0; idx_##filename < cf_glob_ret.c; idx_##filename++) { \
-            const char* filename = cf_glob_ret.p[idx_##filename]; \
-            __VA_ARGS__ \
-        }; \
-        cf_free_glob(cf_saved_glob_checkpoint_##filename); \
-    } while (0);
+
+/* Hack to make the `for` syntax possible for `CF_GLOBS_EACH()` */
+typedef struct {
+    cf_glob_t glob;
+    size_t    checkpoint;
+} cf_glob_iter_hack_t;
+
+static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
+    /* Inlined so this is fine... */
+    return (cf_glob_iter_hack_t){
+        .glob = cf_glob(expr),
+        .checkpoint = cf_num_globs,
+    };
+}
+
+#define CF_GLOBS_EACH(expr, filename) \
+    (cf_glob_iter_hack_t cf_cgh_##filename = cf_glob_begin_hack(expr); \
+    cf_cgh_##filename.glob.p != NULL; \
+    cf_free_glob(cf_cgh_##filename.checkpoint), (void)(cf_cgh_##filename.glob.p = NULL)) \
+    for (char **cf_ci_##filename = cf_cgh_##filename.glob.p, \
+        *filename = *cf_ci_##filename; \
+        cf_ci_##filename < cf_cgh_##filename.glob.p + cf_cgh_##filename.glob.c; \
+        filename = *++cf_ci_##filename)
 
 #define CF_INTERNAL_RUNNER(parallel, format_str, ...) \
     do { \
