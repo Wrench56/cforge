@@ -20,8 +20,12 @@ exit 0
 /* TODO: Port this to Windows someday */
 #include <sys/stat.h>
 
-/* TODO: Add other threading implementations (pthreads, fork, WinAPI) */
+/* TODO: Add other threading implementations (pthreads, WinAPI) */
+#ifdef __STDC_NO_THREADS__
+#error I need threads to build this program!
+#else
 #include <threads.h>
+#endif
 
 /* TODO: Port this environment variable system to Windows */
 extern char** environ;
@@ -32,6 +36,7 @@ uint64_t cenv_hash = 0;
 #define CF_MAX_CONFIGS 64
 #define CF_MAX_GLOBS 64
 #define CF_MAX_THRDS 16
+#define CF_MAX_JOBS 64
 #define CF_MAX_ENVS 256
 #define CF_MAX_JOIN_STRINGS 256
 #define CF_MAX_MAP_ATTRS 8
@@ -59,7 +64,6 @@ uint64_t cenv_hash = 0;
 #define CF_CLIB_FAIL_EC 6
 #define CF_MAX_GLOBS_EC 7
 #define CF_MAX_COMMAND_LENGTH_EC 8
-#define CF_MAX_THRDS_EC 9
 #define CF_TARGET_DEP_CYCLE_EC 10
 #define CF_CONFIG_NOT_FOUND_EC 11
 #define CF_UNKNOWN_ATTR_EC 12
@@ -193,6 +197,23 @@ typedef struct {
     size_t size;
 } cf_map_entry_t;
 
+typedef struct {
+    char* command;
+} cf_thrd_job;
+
+typedef struct {
+    cf_thrd_job jobs[CF_MAX_JOBS];
+    uint16_t active_jobs;
+    int32_t front;
+    int32_t back;
+    mtx_t lock;
+    cnd_t free_slot;
+    cnd_t new_job;
+    cnd_t no_job;
+} cf_work_queue;
+
+static cf_work_queue* global_workq = NULL;
+
 static cf_target_decl_t cf_targets[CF_MAX_TARGETS] = { 0 };
 static size_t cf_num_targets = 0;
 
@@ -215,6 +236,35 @@ static cf_map_entry_t cf_maps[CF_MAX_MAPS] = { 0 };
 static size_t cf_num_maps = 0;
 
 static cf_state_t cf_state = REGISTER_PHASE;
+
+static inline bool cf_empty_job(void) {
+    return global_workq->front == global_workq->back;
+}
+
+static inline bool cf_full_job(void) {
+    return ((global_workq->back + 1) % CF_MAX_JOBS) == global_workq->front;
+}
+
+static bool cf_enqueue_job(cf_thrd_job job) {
+    if (cf_full_job()) {
+        return false;
+    }
+
+    global_workq->jobs[global_workq->back] = job;
+    global_workq->back = (global_workq->back + 1) % CF_MAX_JOBS;
+    return true;
+}
+
+static bool cf_dequeue_job(cf_thrd_job* job) {
+    if (cf_empty_job()) {
+        return false;
+    }
+
+    *job = global_workq->jobs[global_workq->front];
+    global_workq->jobs[global_workq->front] = (cf_thrd_job) { 0 };
+    global_workq->front = (global_workq->front + 1) % CF_MAX_JOBS;
+    return true;
+}
 
 static size_t cf_find_target_index(const char* target_name) {
     for (size_t i = cf_num_targets; i-- > 0;) {
@@ -333,6 +383,14 @@ next_attr:
     size_t jstrings_checkpoint = cf_num_jstrings;
     size_t maps_checkpoint = cf_num_maps;
     target->fn();
+
+    mtx_t* lock = &global_workq->lock;
+    mtx_lock(lock);
+    while (global_workq->active_jobs > 0 || !cf_empty_job()) {
+        cnd_wait(&global_workq->no_job, lock);
+    }
+    mtx_unlock(lock);
+
     cf_free_maps(maps_checkpoint);
     cf_free_jstrings(jstrings_checkpoint);
     cf_free_glob(glob_checkpoint);
@@ -571,29 +629,77 @@ static void cf_free_maps(size_t checkpoint) {
 
 }
 
-static int cf_thrd_helper(void* args) {
-    if (system((char*) args) != 0) {
-        CF_ERR_LOG("Error: Executing command \"%s\" failed\n", (char*) args);
-        exit(CF_CLIB_FAIL_EC);
+static int cf_thrd_helper(void* queue) {
+    cf_work_queue* q = (cf_work_queue*) queue;
+    cf_thrd_job job;
+    mtx_t* lock = &q->lock;
+
+    while (true) {
+        mtx_lock(lock);
+        while (cf_empty_job()) {
+            if (q->active_jobs == 0) {
+                cnd_signal(&q->no_job);
+            }
+            cnd_wait(&q->new_job, lock);
+        }
+        cf_dequeue_job(&job);
+        cnd_signal(&q->free_slot);
+        mtx_unlock(lock);
+
+        if (job.command == NULL) {
+            break;
+        }
+
+        if (system((char*) job.command) != 0) {
+            CF_ERR_LOG("Error: Executing command \"%s\" failed\n", (char*) job.command);
+            exit(CF_CLIB_FAIL_EC);
+        }
+
+        free(job.command);
+        mtx_lock(lock);
+        --q->active_jobs;
+        mtx_unlock(lock);
     }
-    free(args);
+    
     return 0;
 }
 
 static void cf_execute_command(bool is_parallel, char* buffer) {
     if (is_parallel) {
-        if (cf_num_thrds >= CF_MAX_THRDS) {
-            CF_ERR_LOG("Error: Maximum threads of %d was reached!\n", CF_MAX_THRDS);
-            exit(CF_MAX_THRDS_EC);
+        mtx_t* lock = &global_workq->lock;
+        mtx_lock(lock);
+
+        while (cf_full_job()) {
+            while (cf_num_thrds < CF_MAX_THRDS) {    
+                thrd_t worker_thread = 0;
+                if (thrd_create(&worker_thread, &cf_thrd_helper, (void*) global_workq) != thrd_success) {
+                    CF_ERR_LOG("Error: Thread failed during creation in cf_execute_command()\n");
+                    exit(CF_CLIB_FAIL_EC);
+                }
+
+                cf_thrd_pool[cf_num_thrds++] = worker_thread;
+            }
+
+            cnd_wait(&global_workq->free_slot, lock);
         }
 
-        thrd_t worker_thread;
-        if (thrd_create(&worker_thread, &cf_thrd_helper, (void*) buffer) != thrd_success) {
-            CF_ERR_LOG("Error: Thread failed during creation in cf_execute_command()\n");
-            exit(CF_CLIB_FAIL_EC);
+        cf_enqueue_job((cf_thrd_job) {
+            .command = buffer,
+        });
+        ++global_workq->active_jobs;
+        cnd_signal(&global_workq->new_job);
+
+        if (global_workq->active_jobs > cf_num_thrds && cf_num_thrds < CF_MAX_THRDS) {
+            thrd_t worker_thread;
+            if (thrd_create(&worker_thread, &cf_thrd_helper, (void*) global_workq) != thrd_success) {
+                CF_ERR_LOG("Error: Thread failed during creation in cf_execute_command()\n");
+                exit(CF_CLIB_FAIL_EC);
+            }
+
+            cf_thrd_pool[cf_num_thrds++] = worker_thread;
         }
 
-        cf_thrd_pool[cf_num_thrds++] = worker_thread;
+        mtx_unlock(lock);
         return;
     }
 
@@ -1066,6 +1172,18 @@ __attribute__((weak)) int main(int argc, char** argv) {
     size_t environ_len = strlen(*environ);
     denv_hash = xxh64((uint8_t*) *environ, environ_len, 0);
 
+    global_workq = (cf_work_queue*) malloc(sizeof(cf_work_queue));
+    if (global_workq == NULL) {
+        CF_ERR_LOG("Error: malloc() failed in main()\n");
+        exit(CF_CLIB_FAIL_EC);
+    }
+    global_workq->front = 0;
+    global_workq->back = 0;
+    mtx_init(&global_workq->lock, mtx_plain);
+    cnd_init(&global_workq->free_slot);
+    cnd_init(&global_workq->new_job);
+    cnd_init(&global_workq->no_job);
+
     cf_state = TARGET_EXECUTE_PHASE;
     for (int32_t i = 1; i < argc; i++) {
         for (size_t j = 0; j < cf_num_targets; j++) {
@@ -1076,12 +1194,6 @@ __attribute__((weak)) int main(int argc, char** argv) {
                     goto next_iter;
                 }
                 cf_dfs_execute(target);
-                for (size_t t = cf_num_thrds; t > 0; t--) {
-                    thrd_join(cf_thrd_pool[t - 1], NULL);
-                    cf_thrd_pool[t - 1] = (thrd_t) { 0 };
-                }
-
-                cf_num_thrds = 0;
                 goto next_iter;
             }
         }
@@ -1096,6 +1208,24 @@ __attribute__((weak)) int main(int argc, char** argv) {
     cf_db_save(".cforge.db", global_db);
 
 cleanup:
+    mtx_lock(&global_workq->lock);
+    while (cf_full_job()) {
+        cnd_wait(&global_workq->no_job, &global_workq->lock);
+    }
+    for (size_t t = 0; t < cf_num_thrds; t++) {
+
+        cf_enqueue_job((cf_thrd_job) {
+            .command = NULL
+        });
+        cnd_signal(&global_workq->new_job);
+    }
+    mtx_unlock(&global_workq->lock);
+
+    for (size_t t = cf_num_thrds; t > 0; t--) {
+        thrd_join(cf_thrd_pool[t - 1], NULL);
+        cf_thrd_pool[t - 1] = (thrd_t) { 0 };
+    }
+
     for (size_t t_idx = 0; t_idx < cf_num_targets; t_idx++) {
         free(cf_targets[t_idx].attribs);
     }
