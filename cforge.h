@@ -37,14 +37,14 @@ uint64_t cenv_hash = 0;
 #define CF_MAX_MAP_ATTRS 8
 #define CF_MAX_MAPS 64
 #define CF_INIT_PENDING_ENTRIES 64
-#define CF_INIT_PENDING_STRING_SZ 4 * 1024
+#define CF_INIT_PENDING_STRING_SZ (4 * 1024)
 
-#define CF_MAGIC_HEADER_VALUE 0xCFDB
-#define CF_DB_CVERSION 0x3
+#define CF_MAGIC_HEADER_VALUE 0xDBCF
+#define CF_DB_CVERSION 0x4
 
 #define CF_MAX_NAME_LENGTH 127
 #define CF_MAX_OUTSTR_LENGTH 511
-#define CF_MAX_COMMAND_LENGTH 1 * 1024
+#define CF_MAX_COMMAND_LENGTH (1 * 1024)
 #define CF_MAX_JOIN_STRING_LEN 8192
 
 #define CF_ERR_LOG(...) fprintf(stderr, __VA_ARGS__)
@@ -126,9 +126,9 @@ typedef struct {
 
 typedef struct {
     /* Magic header should be CFDB */
-    uint32_t magic_header;
+    uint16_t magic_header;
     uint16_t version;
-    uint16_t reserved;
+    uint32_t reserved;
     size_t entry_cnt;
     size_t string_sz;
 } cf_db_hdr_t __attribute__((aligned(8)));
@@ -138,9 +138,8 @@ typedef struct {
     uint64_t env_hash;
     uint64_t content_hash;
     uint64_t mtime;
-    size_t size;
+    uint64_t size;
     size_t path_offset;
-    void* target;
 } cf_db_entry_t __attribute__((aligned(8)));
 
 /* Technically never used */
@@ -807,7 +806,7 @@ static void cf_db_save(const char* db_path, cf_db_mem_t* db) {
 }
 
 static cf_db_entry_t* cf_db_find(char* path, cf_db_mem_t* db) {
-    if (db->entries == NULL || db->pending_entries == NULL) {
+    if (db->entries == NULL || db->strings == NULL) {
         return NULL;
     }
 
@@ -935,8 +934,8 @@ static void cf_db_mark_utd(char* path, cf_db_mem_t* db) {
         return;
     }
 
-    entry->mtime = (size_t) st.st_mtim.tv_nsec;
-    entry->size = (size_t) st.st_size;
+    entry->mtime = (uint64_t) st.st_mtim.tv_nsec;
+    entry->size = (uint64_t) st.st_size;
     entry->env_hash = cenv_hash;
     entry->content_hash = hash;
 }
@@ -952,11 +951,11 @@ static bool cf_file_utd(char* path) {
         return false;
     }
 
-    if (entry->size != (size_t) st.st_size) {
+    if (entry->size != (uint64_t) st.st_size) {
         return false;
     }
 
-    if (entry->mtime != (size_t) st.st_mtim.tv_nsec) {
+    if (entry->mtime != (uint64_t) st.st_mtim.tv_nsec) {
         return false;
     }
 
