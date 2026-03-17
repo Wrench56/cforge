@@ -40,7 +40,7 @@ uint64_t cenv_hash = 0;
 #define CF_INIT_PENDING_STRING_SZ 4 * 1024
 
 #define CF_MAGIC_HEADER_VALUE 0xCFDB
-#define CF_DB_CVERSION 0x2
+#define CF_DB_CVERSION 0x3
 
 #define CF_MAX_NAME_LENGTH 127
 #define CF_MAX_OUTSTR_LENGTH 511
@@ -143,10 +143,12 @@ typedef struct {
     void* target;
 } cf_db_entry_t __attribute__((aligned(8)));
 
+/* Technically never used */
 typedef struct {
-    size_t len;
+    /* Maximum path on Linux is 4KiB by default */
+    uint16_t len;
     char* string;
-} cf_db_lstring_t;
+} cf_db_lstring_t __attribute__((aligned(2)));
 
 typedef struct {
     cf_db_hdr_t* header;
@@ -811,8 +813,8 @@ static cf_db_entry_t* cf_db_find(char* path, cf_db_mem_t* db) {
         cf_db_entry_t* entry = &db->entries[i];
         if (hash == entry->path_hash) {
             uint8_t* slab = (uint8_t*) db->pending_strings;
-            size_t* len_slot = (size_t*) (slab + entry->path_offset);
-            size_t strl = *len_slot;
+            uint16_t* len_slot = (uint16_t*) (slab + entry->path_offset);
+            uint16_t strl = *len_slot;
             char* strptr = (char*) (len_slot + 1);
             if (strncmp(path, strptr, strl) == 0) {
                 return &db->entries[i];
@@ -826,8 +828,8 @@ static cf_db_entry_t* cf_db_find(char* path, cf_db_mem_t* db) {
         cf_db_entry_t* entry = &db->pending_entries[i];
         if (hash == entry->path_hash) {
             uint8_t* slab = (uint8_t*) db->pending_strings;
-            size_t* len_slot = (size_t*) (slab + entry->path_offset);
-            size_t strl = *len_slot;
+            uint16_t* len_slot = (uint16_t*) (slab + entry->path_offset);
+            uint16_t strl = *len_slot;
             char* strptr = (char*) (len_slot + 1);
             if (strncmp(path, strptr, strl) == 0) {
                 return entry;
@@ -887,15 +889,19 @@ static void cf_db_mark_utd(char* path, cf_db_mem_t* db) {
     if (is_new) {
         size_t str_offset = db->pstrings_off;
         size_t strl = strlen(path);
-        size_t needed = sizeof(size_t) + strl + 1;
+        if (strl > UINT16_MAX) {
+            CF_ERR_LOG("Error: Path length exceeds UINT16 length\n");
+            exit(CF_DB_OOM_EC);
+        }
+        size_t needed = sizeof(uint16_t) + strl + 1;
         if (str_offset + needed > db->pstrings_sz) {
             CF_ERR_LOG("Error: pending strings buffer ran out of space!");
             exit(CF_DB_OOM_EC);
         }
 
         uint8_t* slab = (uint8_t*) db->pending_strings;
-        size_t* len_slot = (size_t*) (slab + db->pstrings_off);
-        *len_slot = strl;
+        uint16_t* len_slot = (uint16_t*) (slab + db->pstrings_off);
+        *len_slot = (uint16_t) strl;
         memcpy(len_slot + 1, path, strl + 1);
 
         size_t idx = db->pentries_idx;
