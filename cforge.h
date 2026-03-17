@@ -1239,6 +1239,10 @@ __attribute__((weak)) int main(int argc, char** argv) {
         cf_thrd_pool[t - 1] = (thrd_t) { 0 };
     }
 
+    mtx_destroy(&global_workq->lock);
+    cnd_destroy(&global_workq->free_slot);
+    cnd_destroy(&global_workq->new_job);
+    cnd_destroy(&global_workq->no_job);
     free(global_workq);
 
 cleanup:
