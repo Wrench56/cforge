@@ -682,7 +682,7 @@ static cf_db_mem_t* cf_db_load(const char* db_path) {
         exit(CF_CLIB_FAIL_EC);
     }
 
-    if (fread(entries, sizeof(cf_db_entry_t), hdr->entry_cnt, fp) != entries_sz) {  
+    if (fread(entries, sizeof(cf_db_entry_t), hdr->entry_cnt, fp) != hdr->entry_cnt) {  
         CF_ERR_LOG("Error: Could not read database entries\n");
         fclose(fp);
         cf_db_free(db);
@@ -697,7 +697,7 @@ static cf_db_mem_t* cf_db_load(const char* db_path) {
         exit(CF_CLIB_FAIL_EC);
     }
 
-    if (fread(entries, 1, hdr->string_sz, fp) != hdr->string_sz) {  
+    if (fread(strings, 1, hdr->string_sz, fp) != hdr->string_sz) {  
         CF_ERR_LOG("Error: Could not read database entries\n");
         fclose(fp);
         cf_db_free(db);
@@ -705,6 +705,7 @@ static cf_db_mem_t* cf_db_load(const char* db_path) {
     }
     
     db->entries = entries;
+    db->strings = strings;
     fclose(fp);
     return db;
 }
