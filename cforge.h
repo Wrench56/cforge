@@ -1132,10 +1132,10 @@ typedef struct {
 
 static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
     /* Inlined so this is fine... */
-    /* TODO: Fix cf_num_globs has to be before cf_glob() */
+    size_t local_num_globs = cf_num_globs;
     return (cf_glob_iter_hack_t){
         .glob = cf_glob(expr),
-        .checkpoint = cf_num_globs,
+        .checkpoint = local_num_globs,
     };
 }
 
