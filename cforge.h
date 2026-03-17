@@ -918,21 +918,6 @@ static cf_db_entry_t* cf_db_find(char* path, cf_db_mem_t* db) {
 
     size_t plen = strlen(path);
     uint64_t hash = xxh64((uint8_t*) path, plen, 0);
-    for (size_t i = 0; i < db->header->entry_cnt; i++) {
-        cf_db_entry_t* entry = &db->entries[i];
-        if (hash == entry->path_hash) {
-            uint8_t* slab = (uint8_t*) db->strings;
-            uint16_t* len_slot = (uint16_t*) (slab + entry->path_offset);
-            uint16_t strl = *len_slot;
-            char* strptr = (char*) (len_slot + 1);
-            if (strncmp(path, strptr, strl) == 0) {
-                return &db->entries[i];
-            } else {
-                CF_WRN_LOG("Warning: Path hash collision detected!\n");
-            }
-        }
-    }
-
     for (size_t i = 0; i < db->pentries_idx; i++) {
         cf_db_entry_t* entry = &db->pending_entries[i];
         if (hash == entry->path_hash) {
@@ -942,6 +927,21 @@ static cf_db_entry_t* cf_db_find(char* path, cf_db_mem_t* db) {
             char* strptr = (char*) (len_slot + 1);
             if (strncmp(path, strptr, strl) == 0) {
                 return entry;
+            } else {
+                CF_WRN_LOG("Warning: Path hash collision detected!\n");
+            }
+        }
+    }
+
+    for (size_t i = 0; i < db->header->entry_cnt; i++) {
+        cf_db_entry_t* entry = &db->entries[i];
+        if (hash == entry->path_hash) {
+            uint8_t* slab = (uint8_t*) db->strings;
+            uint16_t* len_slot = (uint16_t*) (slab + entry->path_offset);
+            uint16_t strl = *len_slot;
+            char* strptr = (char*) (len_slot + 1);
+            if (strncmp(path, strptr, strl) == 0) {
+                return &db->entries[i];
             } else {
                 CF_WRN_LOG("Warning: Path hash collision detected!\n");
             }
