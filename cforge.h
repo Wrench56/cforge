@@ -1207,7 +1207,6 @@ __attribute__((weak)) int main(int argc, char** argv) {
 
     cf_db_save(".cforge.db", global_db);
 
-cleanup:
     mtx_lock(&global_workq->lock);
     while (cf_full_job()) {
         cnd_wait(&global_workq->no_job, &global_workq->lock);
@@ -1226,6 +1225,7 @@ cleanup:
         cf_thrd_pool[t - 1] = (thrd_t) { 0 };
     }
 
+cleanup:
     for (size_t t_idx = 0; t_idx < cf_num_targets; t_idx++) {
         free(cf_targets[t_idx].attribs);
     }
