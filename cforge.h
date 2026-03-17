@@ -314,6 +314,7 @@ static void cf_register_target(const char* name, cf_target_fn fn, const cf_attr_
     };
 }
 
+static inline uint64_t cf_hash_env(char** env);
 uint64_t xxh64(uint8_t* data, size_t len, uint64_t seed);
 static void cf_free_maps(size_t checkpoint);
 static void cf_free_glob(size_t checkpoint);
@@ -376,8 +377,7 @@ next_attr:
         config->fn();
     }
 
-    size_t environ_len = strlen(*environ);
-    cenv_hash = xxh64((uint8_t*) *environ, environ_len, 0);
+    cenv_hash = cf_hash_env(environ);
 
     size_t glob_checkpoint = cf_num_globs;
     size_t jstrings_checkpoint = cf_num_jstrings;
@@ -1082,6 +1082,16 @@ static bool cf_file_utd(char* path) {
     return true;
 }
 
+static inline uint64_t cf_hash_env(char** env) {
+    uint64_t hash = 0;
+    for (char** entry = env; *entry != NULL; entry++) {
+        size_t len = strlen(*entry);
+        hash ^= xxh64((uint8_t*) *entry, len, 0);
+    }
+
+    return hash;
+}
+
 /* Compact XXH64 implementation */
 static const uint64_t XXH64_P1 = 0x9E3779B185EBCA87;
 static const uint64_t XXH64_P2 = 0xC2B2AE3D27D4EB4F;
@@ -1169,8 +1179,7 @@ __attribute__((weak)) int main(int argc, char** argv) {
     }
 
     global_db = cf_db_load(".cforge.db");
-    size_t environ_len = strlen(*environ);
-    denv_hash = xxh64((uint8_t*) *environ, environ_len, 0);
+    denv_hash = cf_hash_env(environ);
 
     global_workq = (cf_work_queue*) malloc(sizeof(cf_work_queue));
     if (global_workq == NULL) {
