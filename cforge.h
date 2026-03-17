@@ -1365,5 +1365,7 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 #define CF_FILE_MARK_UTD(filepath) \
     cf_db_mark_utd(filepath, global_db);
 
+#define CF_NOP \
+    do {} while (0);
 
 #endif // CFORGE_H
