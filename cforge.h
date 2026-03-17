@@ -807,12 +807,16 @@ static void cf_db_save(const char* db_path, cf_db_mem_t* db) {
 }
 
 static cf_db_entry_t* cf_db_find(char* path, cf_db_mem_t* db) {
+    if (db->entries == NULL || db->pending_entries == NULL) {
+        return NULL;
+    }
+
     size_t plen = strlen(path);
     uint64_t hash = xxh64((uint8_t*) path, plen, 0);
     for (size_t i = 0; i < db->header->entry_cnt; i++) {
         cf_db_entry_t* entry = &db->entries[i];
         if (hash == entry->path_hash) {
-            uint8_t* slab = (uint8_t*) db->pending_strings;
+            uint8_t* slab = (uint8_t*) db->strings;
             uint16_t* len_slot = (uint16_t*) (slab + entry->path_offset);
             uint16_t strl = *len_slot;
             char* strptr = (char*) (len_slot + 1);
