@@ -1368,4 +1368,26 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 #define CF_NOP \
     do {} while (0);
 
+#define CF_BOLD "\x1b[1m"
+#define CF_UNDERLINE "\x1b[4m"
+#define CF_INVERSE "\x1b[7m"
+#define CF_BLACK "\x1b[30m"
+#define CF_RED "\x1b[31m"
+#define CF_GREEN "\x1b[32m"
+#define CF_YELLOW "\x1b[33m"
+#define CF_BLUE "\x1b[34m"
+#define CF_MAGENTA "\x1b[35m"
+#define CF_CYAN "\x1b[36m"
+#define CF_WHITE "\x1b[37m"
+#define CF_BG_BLACK "\x1b[40m"
+#define CF_BG_RED "\x1b[41m"
+#define CF_BG_GREEN "\x1b[42m"
+#define CF_BG_YELLOW "\x1b[43m"
+#define CF_BG_BLUE "\x1b[44m"
+#define CF_BG_MAGENTA "\x1b[45m"
+#define CF_BG_CYAN "\x1b[46m"
+#define CF_BG_WHITE "\x1b[37m"
+#define CF_RESET "\x1b[0m"
+
+
 #endif // CFORGE_H
