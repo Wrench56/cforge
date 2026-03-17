@@ -36,6 +36,8 @@ uint64_t cenv_hash = 0;
 #define CF_MAX_JOIN_STRINGS 256
 #define CF_MAX_MAP_ATTRS 8
 #define CF_MAX_MAPS 64
+#define CF_INIT_PENDING_ENTRIES 64
+#define CF_INIT_PENDING_STRING_SZ 4 * 1024
 
 #define CF_MAGIC_HEADER_VALUE 0xCFDB
 #define CF_DB_CVERSION 0x2
@@ -68,6 +70,7 @@ uint64_t cenv_hash = 0;
 #define CF_DB_IO_FAIL 17
 #define CF_DB_MAGIC_FAIL 18
 #define CF_DB_VERSION_FAIL 19
+#define CF_DB_OOM_EC 20
 
 typedef void (*cf_target_fn)(void);
 typedef void (*cf_config_fn)(void);
@@ -149,6 +152,13 @@ typedef struct {
     cf_db_hdr_t* header;
     cf_db_entry_t* entries;
     cf_db_lstring_t* strings;
+    cf_db_entry_t* pending_entries;
+    cf_db_lstring_t* pending_strings;
+    /* max index */
+    size_t pentries_max;
+    size_t pentries_idx;
+    size_t pstrings_sz;
+    size_t pstrings_off;
 } cf_db_mem_t;
 
 static cf_db_mem_t* global_db = NULL;
@@ -618,6 +628,18 @@ static void cf_db_free(cf_db_mem_t* db) {
         db->strings = NULL;
     }
 
+    cf_db_entry_t* pentries = db->pending_entries;
+    if (pentries != NULL) {
+        free(pentries);
+        db->pending_entries = NULL;
+    }
+
+    cf_db_lstring_t* pstrings = db->pending_strings;
+    if (pstrings != NULL) {
+        free(pstrings);
+        db->pending_strings = NULL;
+    }
+
     free(db);
 }
 
@@ -628,7 +650,9 @@ static cf_db_mem_t* cf_db_load(const char* db_path) {
     memset(db, 0, sizeof(cf_db_mem_t));
 
     cf_db_hdr_t* hdr = (cf_db_hdr_t*) malloc(sizeof(cf_db_hdr_t));
-    if (db == NULL || hdr == NULL) {
+    cf_db_entry_t* pentries = (cf_db_entry_t*) malloc(CF_INIT_PENDING_ENTRIES * sizeof(cf_db_entry_t));
+    cf_db_lstring_t* pstrings = (cf_db_lstring_t*) malloc(CF_INIT_PENDING_STRING_SZ);
+    if (db == NULL || hdr == NULL || pentries == NULL || pstrings == NULL) {
         CF_ERR_LOG("Error: malloc() failed in cf_load_db() for db_mem\n");
         if (fp != NULL) {
             fclose(fp);
@@ -638,6 +662,12 @@ static cf_db_mem_t* cf_db_load(const char* db_path) {
     }
 
     db->header = hdr;
+    db->pending_entries = pentries;
+    db->pending_strings = pstrings;
+    db->pentries_max = CF_INIT_PENDING_ENTRIES;
+    db->pstrings_sz = CF_INIT_PENDING_STRING_SZ;
+    db->pentries_idx = 0;
+    db->pstrings_off = 0;
 
     /* Default when DB not found */
     if (fp == NULL) {
@@ -673,8 +703,7 @@ static cf_db_mem_t* cf_db_load(const char* db_path) {
         exit(CF_DB_VERSION_FAIL);
     }
 
-    size_t entries_sz = hdr->entry_cnt * sizeof(cf_db_entry_t);
-    cf_db_entry_t* entries = (cf_db_entry_t*) malloc(entries_sz);
+    cf_db_entry_t* entries = (cf_db_entry_t*) malloc(hdr->entry_cnt * sizeof(cf_db_entry_t));
     if (entries == NULL) {
         CF_ERR_LOG("Error: malloc() failed in cf_load_db() for entries\n");
         fclose(fp);
@@ -724,6 +753,10 @@ static void cf_db_save(const char* db_path, cf_db_mem_t* db) {
     }
 
     cf_db_hdr_t* hdr = db->header;
+    size_t entry_cnt = hdr->entry_cnt;
+    size_t string_sz = hdr->string_sz;
+    hdr->entry_cnt += db->pentries_idx;
+    hdr->string_sz += db->pstrings_off;
     if(fwrite(hdr, sizeof(cf_db_hdr_t), 1, fp) != 1) {
         CF_ERR_LOG("Error: Could not write database header\n");
         fclose(fp);
@@ -731,31 +764,42 @@ static void cf_db_save(const char* db_path, cf_db_mem_t* db) {
         exit(CF_DB_IO_FAIL);
     }
 
-    if (db->entries == NULL) {
-        goto save_strings;
+    if (db->entries != NULL) {
+        if (fwrite(db->entries, sizeof(cf_db_entry_t), entry_cnt, fp) != entry_cnt) {
+            CF_ERR_LOG("Error: Could not write database entries\n");
+            fclose(fp);
+            cf_db_free(db);
+            exit(CF_DB_IO_FAIL);
+        }
     }
     
-    if (fwrite(db->entries, sizeof(cf_db_entry_t), hdr->entry_cnt, fp) != hdr->entry_cnt) {
-        CF_ERR_LOG("Error: Could not write database entries\n");
-        fclose(fp);
-        cf_db_free(db);
-        exit(CF_DB_IO_FAIL);
+    if (db->pentries_idx > 0) {
+        if (fwrite(db->pending_entries, sizeof(cf_db_entry_t), db->pentries_idx, fp) != db->pentries_idx) {
+            CF_ERR_LOG("Error: Could not write new database entries\n");
+            fclose(fp);
+            cf_db_free(db);
+            exit(CF_DB_IO_FAIL);
+        }
     }
 
-save_strings:
-    if (db->strings == NULL) {
-        goto cleanup;
+    if (db->strings != NULL) {
+        if (fwrite(db->strings, 1, string_sz, fp) != string_sz) {
+            CF_ERR_LOG("Error: Could not write database strings\n");
+            fclose(fp);
+            cf_db_free(db);
+            exit(CF_DB_IO_FAIL);
+        }
     }
 
-    /* TODO: Update to be able to add new strings */
-    if (fwrite(db->strings, 1, hdr->string_sz, fp) != hdr->string_sz) {
-        CF_ERR_LOG("Error: Could not write database strings\n");
-        fclose(fp);
-        cf_db_free(db);
-        exit(CF_DB_IO_FAIL);
+    if (db->pstrings_off > 0) {
+        if (fwrite(db->pending_strings, 1, db->pstrings_off, fp) != db->pstrings_off) {
+            CF_ERR_LOG("Error: Could not write new database strings\n");
+            fclose(fp);
+            cf_db_free(db);
+            exit(CF_DB_IO_FAIL);
+        }
     }
 
-cleanup:
     fclose(fp);
     cf_db_free(db);
 }
@@ -764,10 +808,13 @@ static cf_db_entry_t* cf_db_find(char* path, cf_db_mem_t* db) {
     size_t plen = strlen(path);
     uint64_t hash = xxh64((uint8_t*) path, plen, 0);
     for (size_t i = 0; i < db->header->entry_cnt; i++) {
-        cf_db_entry_t entry = db->entries[i];
-        if (hash == entry.path_hash) {
-            cf_db_lstring_t lstring = db->strings[entry.path_offset];
-            if (strncmp(path, lstring.string, lstring.len)) {
+        cf_db_entry_t* entry = &db->entries[i];
+        if (hash == entry->path_hash) {
+            uint8_t* slab = (uint8_t*) db->pending_strings;
+            size_t* len_slot = (size_t*) (slab + entry->path_offset);
+            size_t strl = *len_slot;
+            char* strptr = (char*) (len_slot + 1);
+            if (strncmp(path, strptr, strl) == 0) {
                 return &db->entries[i];
             } else {
                 CF_WRN_LOG("Warning: Path hash collision detected!\n");
@@ -775,7 +822,113 @@ static cf_db_entry_t* cf_db_find(char* path, cf_db_mem_t* db) {
         }
     }
 
+    for (size_t i = 0; i < db->pentries_idx; i++) {
+        cf_db_entry_t* entry = &db->pending_entries[i];
+        if (hash == entry->path_hash) {
+            uint8_t* slab = (uint8_t*) db->pending_strings;
+            size_t* len_slot = (size_t*) (slab + entry->path_offset);
+            size_t strl = *len_slot;
+            char* strptr = (char*) (len_slot + 1);
+            if (strncmp(path, strptr, strl) == 0) {
+                return entry;
+            } else {
+                CF_WRN_LOG("Warning: Path hash collision detected!\n");
+            }
+        }
+    }
+
     return NULL;
+}
+
+static bool cf_db_hash_file(char* path, uint64_t* hash) {
+    FILE* fp = fopen(path, "rb");
+    if (fp == NULL) {
+        return false;
+    }
+
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return false;
+    }
+
+    ssize_t sz = ftell(fp);
+    if (sz < 0) {
+        fclose(fp);
+        return false;
+    }
+
+    rewind(fp);
+    uint8_t* buf = (uint8_t*) malloc((size_t) sz);
+    if (buf == NULL) {
+        CF_ERR_LOG("Error: malloc() failed in cf_db_hash_file()\n"); \
+        exit(CF_CLIB_FAIL_EC); \
+    }
+
+    if (fread(buf, 1, (size_t) sz, fp) != (size_t) sz) {
+        fclose(fp);
+        free(buf);
+        return false;
+    }
+
+    fclose(fp);
+    buf[sz] = '\0';
+    *hash = xxh64(buf, (size_t) sz, 0);
+    free(buf);
+    return true;
+
+}
+
+static void cf_db_mark_utd(char* path, cf_db_mem_t* db) {
+    cf_db_entry_t* entry = cf_db_find(path, global_db);
+    bool is_new = (entry == NULL);
+    size_t saved_pstrings_off = db->pstrings_off;
+    size_t saved_pentries_idx = db->pentries_idx;
+
+    if (is_new) {
+        size_t str_offset = db->pstrings_off;
+        size_t strl = strlen(path);
+        size_t needed = sizeof(size_t) + strl + 1;
+        if (str_offset + needed > db->pstrings_sz) {
+            CF_ERR_LOG("Error: pending strings buffer ran out of space!");
+            exit(CF_DB_OOM_EC);
+        }
+
+        uint8_t* slab = (uint8_t*) db->pending_strings;
+        size_t* len_slot = (size_t*) (slab + db->pstrings_off);
+        *len_slot = strl;
+        memcpy(len_slot + 1, path, strl + 1);
+
+        size_t idx = db->pentries_idx;
+        if (idx >= db->pentries_max) {
+            CF_ERR_LOG("Error: pending entries buffer ran out of space!");
+            exit(CF_DB_OOM_EC);
+        }
+
+        entry = &db->pending_entries[idx];
+        entry->path_offset = str_offset;
+        entry->path_hash = xxh64((uint8_t*) path, strl, 0);
+        db->pentries_idx++;
+        db->pstrings_off += needed;
+    }
+
+    struct stat st;
+    if (stat(path, &st) == -1) {
+        db->pstrings_off = saved_pstrings_off;
+        db->pentries_idx = saved_pentries_idx;
+        return;
+    }
+
+    uint64_t hash = 0;
+    if (!cf_db_hash_file(path, &hash)) {
+        db->pstrings_off = saved_pstrings_off;
+        db->pentries_idx = saved_pentries_idx;
+        return;
+    }
+
+    entry->mtime = (size_t) st.st_mtim.tv_nsec;
+    entry->size = (size_t) st.st_size;
+    entry->env_hash = cenv_hash;
+    entry->content_hash = hash;
 }
 
 static bool cf_file_utd(char* path) {
@@ -802,38 +955,12 @@ static bool cf_file_utd(char* path) {
     }
 
     /* TODO: Optimize the above so that this never has to run */
-    FILE* fp = fopen(path, "rb");
-    if (fp == NULL) {
+    uint64_t hash = 0;
+    if (cf_db_hash_file(path, &hash) == false) {
         return false;
     }
 
-    if (fseek(fp, 0, SEEK_END) != 0) {
-        fclose(fp);
-        return false;
-    }
-
-    ssize_t sz = ftell(fp);
-    if (sz < 0) {
-        fclose(fp);
-        return false;
-    }
-
-    rewind(fp);
-    uint8_t* buf = (uint8_t*) malloc((size_t) sz);
-    if (buf == NULL) {
-        CF_ERR_LOG("Error: malloc() failed in cf_file_utd()\n"); \
-        exit(CF_CLIB_FAIL_EC); \
-    }
-
-    if (fread(buf, 1, (size_t) sz, fp) != (size_t) sz) {
-        fclose(fp);
-        free(buf);
-        return false;
-    }
-
-    fclose(fp);
-    buf[sz] = '\0';
-    if (xxh64(buf, (size_t) sz, 0) != entry->content_hash) {
+    if (hash != entry->content_hash) {
         return false;
     }
 
@@ -996,6 +1123,7 @@ typedef struct {
 
 static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
     /* Inlined so this is fine... */
+    /* TODO: Fix cf_num_globs has to be before cf_glob() */
     return (cf_glob_iter_hack_t){
         .glob = cf_glob(expr),
         .checkpoint = cf_num_globs,
@@ -1074,5 +1202,9 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 
 #define CF_FILE_NOT_UTD(filepath) \
     (!cf_file_utd((char*) filepath))
+
+#define CF_FILE_MARK_UTD(filepath) \
+    cf_db_mark_utd(filepath, global_db);
+
 
 #endif // CFORGE_H
