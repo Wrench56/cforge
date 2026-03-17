@@ -864,7 +864,7 @@ static bool cf_db_hash_file(char* path, uint64_t* hash) {
     }
 
     rewind(fp);
-    uint8_t* buf = (uint8_t*) malloc((size_t) sz);
+    uint8_t* buf = (uint8_t*) malloc((size_t) sz + 1);
     if (buf == NULL) {
         CF_ERR_LOG("Error: malloc() failed in cf_db_hash_file()\n"); \
         exit(CF_CLIB_FAIL_EC); \
