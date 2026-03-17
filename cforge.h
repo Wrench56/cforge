@@ -1192,6 +1192,7 @@ __attribute__((weak)) int main(int argc, char** argv) {
     }
     global_workq->front = 0;
     global_workq->back = 0;
+    global_workq->active_jobs = 0;
     mtx_init(&global_workq->lock, mtx_plain);
     cnd_init(&global_workq->free_slot);
     cnd_init(&global_workq->new_job);
@@ -1237,6 +1238,8 @@ __attribute__((weak)) int main(int argc, char** argv) {
         thrd_join(cf_thrd_pool[t - 1], NULL);
         cf_thrd_pool[t - 1] = (thrd_t) { 0 };
     }
+
+    free(global_workq);
 
 cleanup:
     for (size_t t_idx = 0; t_idx < cf_num_targets; t_idx++) {
