@@ -375,9 +375,12 @@ next_attr:
     size_t env_checkpoint = cf_num_envs;
     if (config != NULL) {
         config->fn();
+        cenv_hash = cf_hash_env(environ);
+    } else {
+        /* Commands in system() can't change parent environment! */
+        cenv_hash = denv_hash;
     }
 
-    cenv_hash = cf_hash_env(environ);
 
     size_t glob_checkpoint = cf_num_globs;
     size_t jstrings_checkpoint = cf_num_jstrings;
@@ -585,8 +588,9 @@ static char** cf_map(const char** sources, size_t src_length, cf_map_attr_t* att
                 case MAP_EXT: {
                     const char* dot = strrchr(outstr, '.');
                     size_t length = (size_t) (dot - outstr + 1);
-                    memcpy(outstr + length, attr.n_ext, strlen(attr.n_ext));
-                    outstr[length + strlen(attr.n_ext)] = '\0';
+                    size_t ext_len = strlen(attr.n_ext);
+                    memcpy(outstr + length, attr.n_ext, ext_len);
+                    outstr[length + ext_len] = '\0';
                     break;
                 }
                 case MAP_PARENT: {
