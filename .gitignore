@@ -8,5 +8,11 @@
 .b
 .cforge.db
 
+# Ignore direnv directory
+.direnv/
+
+# Ignore static analyzer outputs
+cforge.plist/
+
 # Ignore playground/ directory
 playground/
