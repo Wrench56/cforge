@@ -179,6 +179,7 @@ typedef enum {
     MAP_UNKNOWN = 0,
     MAP_EXT,
     MAP_PARENT,
+    MAP_DIRS,
 } cf_map_attr_type_t;
 
 typedef struct {
@@ -189,6 +190,9 @@ typedef struct {
         };
         struct {
             char* n_parent;
+        };
+        struct {
+            char* n_dirs;
         };
     };
 } cf_map_attr_t;
@@ -614,6 +618,18 @@ static char** cf_map(const char** sources, size_t src_length, cf_map_attr_t* att
                     size_t length = strlen(attr.n_parent);
                     memmove(outstr + length, slash, strlen(slash) + 1);
                     memcpy(outstr, attr.n_parent, length);
+                    break;
+                }
+                case MAP_DIRS: {
+                    char* slash = strrchr(outstr, '/');
+                    if (slash == NULL) {
+                        CF_WRN_LOG("Warning: No directory found to replace in cf_map()\n");
+                        break;
+                    }
+
+                    size_t length = strlen(attr.n_dirs);
+                    memmove(outstr + length, slash, strlen(slash) + 1);
+                    memcpy(outstr, attr.n_dirs, length);
                     break;
                 }
                 case MAP_UNKNOWN: {
@@ -1372,6 +1388,12 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
     (cf_map_attr_t) { \
         .type = MAP_PARENT, \
         .n_parent = new_parent \
+    }
+
+#define CF_MAP_DIRS(new_dirs) \
+    (cf_map_attr_t) { \
+        .type = MAP_DIRS, \
+        .n_dirs = new_dirs \
     }
 
 #define CF_FILE_UTD(filepath) \
