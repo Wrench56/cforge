@@ -45,7 +45,7 @@ uint64_t cenv_hash = 0;
 #define CF_INIT_PENDING_STRING_SZ (4 * 1024)
 
 #define CF_MAGIC_HEADER_VALUE 0xDBCF
-#define CF_DB_CVERSION 0x4
+#define CF_DB_CVERSION 0x5
 
 #define CF_MAX_NAME_LENGTH 127
 #define CF_MAX_OUTSTR_LENGTH 511
@@ -141,7 +141,8 @@ typedef struct {
     uint64_t path_hash;
     uint64_t env_hash;
     uint64_t content_hash;
-    uint64_t mtime;
+    uint64_t mtime_sec;
+    uint64_t mtime_nsec;
     uint64_t size;
     size_t path_offset;
 } cf_db_entry_t __attribute__((aligned(8)));
@@ -1044,7 +1045,8 @@ static void cf_db_mark_utd(char* path, cf_db_mem_t* db) {
         return;
     }
 
-    entry->mtime = (uint64_t) st.st_mtim.tv_nsec;
+    entry->mtime_sec = (uint64_t) st.st_mtim.tv_sec;
+    entry->mtime_nsec = (uint64_t) st.st_mtim.tv_nsec;
     entry->size = (uint64_t) st.st_size;
     entry->env_hash = cenv_hash;
     entry->content_hash = hash;
@@ -1065,7 +1067,11 @@ static bool cf_file_utd(char* path) {
         return false;
     }
 
-    if (entry->mtime != (uint64_t) st.st_mtim.tv_nsec) {
+    if (entry->mtime_nsec != (uint64_t) st.st_mtim.tv_nsec) {
+        return false;
+    }
+
+    if (entry->mtime_sec != (uint64_t) st.st_mtim.tv_sec) {
         return false;
     }
 
