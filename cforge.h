@@ -759,8 +759,6 @@ static cf_db_mem_t* cf_db_load(const char* db_path) {
     FILE* fp = fopen(db_path, "rb");
 
     cf_db_mem_t* db = (cf_db_mem_t*) malloc(sizeof(cf_db_mem_t));
-    memset(db, 0, sizeof(cf_db_mem_t));
-
     cf_db_hdr_t* hdr = (cf_db_hdr_t*) malloc(sizeof(cf_db_hdr_t));
     cf_db_entry_t* pentries = (cf_db_entry_t*) malloc(CF_INIT_PENDING_ENTRIES * sizeof(cf_db_entry_t));
     cf_db_lstring_t* pstrings = (cf_db_lstring_t*) malloc(CF_INIT_PENDING_STRING_SZ);
@@ -769,10 +767,15 @@ static cf_db_mem_t* cf_db_load(const char* db_path) {
         if (fp != NULL) {
             fclose(fp);
         }
-        cf_db_free(db);
+    
+        free(hdr);
+        free(pentries);
+        free(pstrings);
+        free(db);
         exit(CF_CLIB_FAIL_EC);
     }
 
+    memset(db, 0, sizeof(cf_db_mem_t));
     db->header = hdr;
     db->pending_entries = pentries;
     db->pending_strings = pstrings;
