@@ -102,7 +102,8 @@ typedef void (*cf_config_fn)(void);
 typedef enum {
     UNKNOWN = 0,
     DEPENDENCY,
-    CONFIG_SET
+    CONFIG_SET,
+    HELP_STRING
 } cf_attr_type_t;
 
 typedef struct {
@@ -114,6 +115,9 @@ typedef struct {
         struct {
             const char* config_name;
         } configset;
+        struct {
+            const char* help_string;
+        } helpstring;
     } arg;
 } cf_attr_t;
 
@@ -390,6 +394,8 @@ static void cf_dfs_execute(cf_target_decl_t* target) {
                 exit(CF_CONFIG_NOT_FOUND_EC);
                 break;
             }
+            case HELP_STRING:
+                goto next_attr;
             case UNKNOWN: {
                 CF_ERR_LOG("Error: Unknown attribute given for target \"%s\"\n", target->name);
                 exit(CF_UNKNOWN_ATTR_EC);
@@ -1262,6 +1268,27 @@ __attribute__((weak)) int main(int argc, char** argv) {
     (void) cf_join;
 
     if (argc == 1) {
+        printf("Usage:\n ./cforge.h <target> [...]\n\nAvailable targets:\n");
+        for (size_t i = 0; i < cf_num_targets; i++) {
+            cf_target_decl_t target = cf_targets[i];
+            const char* help_str = NULL;
+            for (size_t j = 0; j < target.attribs_size; j++) {
+                if (target.attribs[j].type == HELP_STRING) {
+                    if (help_str != NULL) {
+                        CF_WRN_LOG("Warning: Help string for target \"%s\" provided multiple times! Using first definition.", target.name);
+                        continue;
+                    }
+                    help_str = target.attribs[j].arg.helpstring.help_string;
+                }
+            }
+            if (help_str == NULL) {
+
+                printf(" > %s\n", cf_targets[i].name);
+            } else {
+                printf(" > %s - %s\n", cf_targets[i].name, help_str);
+            }
+        }
+
         goto cleanup;
     }
 
@@ -1415,6 +1442,14 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
         .type = CONFIG_SET, \
         .arg.configset = { \
             .config_name = #config_ident \
+        } \
+    }
+
+#define CF_HELP_STRING(str) \
+    (cf_attr_t) { \
+        .type = HELP_STRING, \
+        .arg.helpstring = { \
+            .help_string = str \
         } \
     }
 
