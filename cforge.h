@@ -103,7 +103,8 @@ typedef enum {
     UNKNOWN = 0,
     DEPENDENCY,
     CONFIG_SET,
-    HELP_STRING
+    HELP_STRING,
+    HIDDEN
 } cf_attr_type_t;
 
 typedef struct {
@@ -395,6 +396,7 @@ static void cf_dfs_execute(cf_target_decl_t* target) {
                 break;
             }
             case HELP_STRING:
+            case HIDDEN:
                 goto next_attr;
             case UNKNOWN: {
                 CF_ERR_LOG("Error: Unknown attribute given for target \"%s\"\n", target->name);
@@ -1272,6 +1274,7 @@ __attribute__((weak)) int main(int argc, char** argv) {
         for (size_t i = 0; i < cf_num_targets; i++) {
             cf_target_decl_t target = cf_targets[i];
             const char* help_str = NULL;
+            bool hidden = false;
             for (size_t j = 0; j < target.attribs_size; j++) {
                 if (target.attribs[j].type == HELP_STRING) {
                     if (help_str != NULL) {
@@ -1279,14 +1282,26 @@ __attribute__((weak)) int main(int argc, char** argv) {
                         continue;
                     }
                     help_str = target.attribs[j].arg.helpstring.help_string;
+                } else if (target.attribs[j].type == HIDDEN) {
+                    if (hidden) {
+                        CF_WRN_LOG("Warning: Hidden attribute for target \"%s\" used multiple times!",  target.name);
+                        continue;
+                    }
+                    hidden = true;
                 }
             }
-            if (help_str == NULL) {
 
+            if (hidden) {
+                goto next_target;
+            }
+
+            if (help_str == NULL) {
                 printf(" > %s\n", cf_targets[i].name);
             } else {
                 printf(" > %s - %s\n", cf_targets[i].name, help_str);
             }
+next_target:
+            continue;
         }
 
         goto cleanup;
@@ -1451,6 +1466,12 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
         .arg.helpstring = { \
             .help_string = str \
         } \
+    }
+
+#define CF_HIDDEN \
+    (cf_attr_t) { \
+        .type = HIDDEN, \
+        .arg.depends = { 0 } \
     }
 
 #define CF_SET_ENV(ident, value) cf_setenv_wrapper(#ident, value);
