@@ -9,6 +9,19 @@ exec "./.b" "$@"
 exit 0
 #endif
 
+/* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
+/*                                                     */
+/*  CForge Build Tool                                  */
+/*                                             v0.0.1  */
+/*                                                     */
+/* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
+/*                                                     */
+/*  Author : Mark Devenyi                              */
+/*  Source : https://github.com/Wrench56/cforge        */
+/*  License: MIT License                               */
+/*                                                     */
+/* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
+
 #include <glob.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -31,6 +44,10 @@ exit 0
 extern char** environ;
 uint64_t denv_hash = 0;
 uint64_t cenv_hash = 0;
+
+#define CF_VERSION_MAJOR 0
+#define CF_VERSION_MINOR 0
+#define CF_VERSION_PATCH 1
 
 #define CF_MAX_TARGETS 64
 #define CF_MAX_CONFIGS 64
