@@ -659,6 +659,16 @@ static void cf_free_maps(size_t checkpoint) {
 
 }
 
+static inline bool cf_file_exists(char* path) {
+    FILE* file = fopen(path, "rb");
+    if (file != NULL) {
+        fclose(file);
+        return true;
+    }
+
+    return false;
+}
+
 static int cf_thrd_helper(void* queue) {
     cf_work_queue* q = (cf_work_queue*) queue;
     cf_thrd_job job;
@@ -1404,6 +1414,9 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 
 #define CF_FILE_MARK_UTD(filepath) \
     cf_db_mark_utd(filepath, global_db);
+
+#define CF_FILE_EXISTS(filepath) \
+    (cf_file_exists((char*) filepath))
 
 #define CF_NOP \
     do {} while (0);
