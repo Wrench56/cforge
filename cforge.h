@@ -660,13 +660,8 @@ static void cf_free_maps(size_t checkpoint) {
 }
 
 static inline bool cf_file_exists(char* path) {
-    FILE* file = fopen(path, "rb");
-    if (file != NULL) {
-        fclose(file);
-        return true;
-    }
-
-    return false;
+    struct stat st;
+    return stat(path, &st) == 0;
 }
 
 static int cf_thrd_helper(void* queue) {
