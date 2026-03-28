@@ -41,6 +41,7 @@ uint64_t cenv_hash = 0;
 #define CF_MAX_JOIN_STRINGS 256
 #define CF_MAX_MAP_ATTRS 8
 #define CF_MAX_MAPS 64
+#define CF_MAX_DEFERRED_UTD 512
 #define CF_INIT_PENDING_ENTRIES 64
 #define CF_INIT_PENDING_STRING_SZ (4 * 1024)
 
@@ -75,6 +76,7 @@ uint64_t cenv_hash = 0;
 #define CF_DB_MAGIC_FAIL 18
 #define CF_DB_VERSION_FAIL 19
 #define CF_DB_OOM_EC 20
+#define CF_MAX_DEFERRED_UTD_EC 21
 
 typedef void (*cf_target_fn)(void);
 typedef void (*cf_config_fn)(void);
@@ -240,6 +242,9 @@ static size_t cf_num_jstrings = 0;
 static cf_map_entry_t cf_maps[CF_MAX_MAPS] = { 0 };
 static size_t cf_num_maps = 0;
 
+static char* cf_deferred_utd[CF_MAX_DEFERRED_UTD] = { 0 };
+static size_t cf_num_deferred_utd = 0;
+
 static cf_state_t cf_state = REGISTER_PHASE;
 
 static inline bool cf_empty_job(void) {
@@ -325,6 +330,7 @@ static void cf_free_maps(size_t checkpoint);
 static void cf_free_glob(size_t checkpoint);
 static void cf_free_jstrings(size_t checkpoint);
 static void cf_restore_env(size_t env_checkpoint);
+static void cf_db_mark_utd(char* path, cf_db_mem_t* db);
 static void cf_dfs_execute(cf_target_decl_t* target) {
     if (target->node_status == DONE) {
         return;
@@ -398,6 +404,12 @@ next_attr:
         cnd_wait(&global_workq->no_job, lock);
     }
     mtx_unlock(lock);
+
+    for (size_t i = 0; i < cf_num_deferred_utd; i++) {
+        cf_db_mark_utd(cf_deferred_utd[i], global_db);
+        free(cf_deferred_utd[i]);
+    }
+    cf_num_deferred_utd = 0;
 
     cf_free_maps(maps_checkpoint);
     cf_free_jstrings(jstrings_checkpoint);
@@ -1085,6 +1097,21 @@ static void cf_db_mark_utd(char* path, cf_db_mem_t* db) {
     entry->content_hash = hash;
 }
 
+static void cf_db_defer_mark_utd(char* path) {
+    if (cf_num_deferred_utd >= CF_MAX_DEFERRED_UTD) {
+        CF_ERR_LOG("Error: Maximum deferred UTD marks reached!");
+        exit(CF_MAX_DEFERRED_UTD_EC);
+    }
+
+    char* ptr = strdup(path);
+    if (ptr == NULL) {
+        CF_ERR_LOG("Error: strdup() failed in cf_db_defer_mark_utd()!\n");
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    cf_deferred_utd[cf_num_deferred_utd++] = ptr;
+}
+
 static bool cf_file_utd(char* path) {
     cf_db_entry_t* entry = cf_db_find(path, global_db);
     if (entry == NULL) {
@@ -1409,6 +1436,9 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 
 #define CF_FILE_MARK_UTD(filepath) \
     cf_db_mark_utd(filepath, global_db);
+
+#define CF_FILE_MARK_UTDP(filepath) \
+    cf_db_defer_mark_utd((char*) filepath);
 
 #define CF_FILE_EXISTS(filepath) \
     (cf_file_exists((char*) filepath))
