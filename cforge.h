@@ -186,8 +186,7 @@ static cf_db_mem_t* global_db = NULL;
 
 typedef enum {
     REGISTER_PHASE = 0,
-    TARGET_PLAN_PHASE = 1,
-    TARGET_EXECUTE_PHASE = 2,
+    TARGET_EXECUTE_PHASE = 1,
 } cf_state_t;
 
 typedef enum {
