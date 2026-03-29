@@ -1757,15 +1757,21 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 #define CF_READ(path) \
     cf_read_file((char*) path)
 
-#define CF_BANNER(...) \
+#define CF_CONCAT_(a, b) a##b
+#define CF_CONCAT(a, b) CF_CONCAT_(a, b)
+
+#define CF_BANNER_IMPL(id, ...) \
     do { \
-        static bool cf_banner_shown_##__LINE__ = false; \
-        if (!cf_banner_shown_##__LINE__) { \
-            cf_banner_shown_##__LINE__ = true; \
+        static bool CF_CONCAT(cf_banner_shown_, id) = false; \
+        if (!CF_CONCAT(cf_banner_shown_, id)) { \
+            CF_CONCAT(cf_banner_shown_, id) = true; \
             printf(__VA_ARGS__); \
             putchar('\n'); \
         } \
     } while (0)
+
+#define CF_BANNER(...) \
+    CF_BANNER_IMPL(__COUNTER__, __VA_ARGS__)
 
 #define CF_NOP() \
     do {} while (0)
