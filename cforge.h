@@ -783,7 +783,7 @@ static int cf_thrd_helper(void* queue) {
     return 0;
 }
 
-static void cf_execute_command(bool is_parallel, char* buffer) {
+__attribute__((unused)) static void cf_execute_command(bool is_parallel, char* buffer) {
     if (is_verbose_target) {
         printf("%s\n", buffer);
     }
@@ -1196,7 +1196,7 @@ static bool cf_db_hash_file(char* path, uint64_t* hash) {
 #endif // CF_DISABLE_FILE_HASH
 }
 
-static void cf_db_mark_utd(char* path, cf_db_mem_t* db) {
+__attribute__((unused)) static void cf_db_mark_utd(char* path, cf_db_mem_t* db) {
     cf_db_entry_t* entry = cf_db_find(path, global_db);
     bool is_new = (entry == NULL);
     size_t saved_pstrings_off = db->pstrings_off;
@@ -1254,7 +1254,7 @@ static void cf_db_mark_utd(char* path, cf_db_mem_t* db) {
     entry->content_hash = hash;
 }
 
-static void cf_db_defer_mark_utd(char* path) {
+__attribute__((unused)) static void cf_db_defer_mark_utd(char* path) {
     if (cf_num_deferred_utd >= CF_MAX_DEFERRED_UTD) {
         CF_ERR_LOG("Error: Maximum deferred UTD marks reached!");
         exit(CF_MAX_REACHED_EC);
@@ -1269,7 +1269,7 @@ static void cf_db_defer_mark_utd(char* path) {
     cf_deferred_utd[cf_num_deferred_utd++] = ptr;
 }
 
-static bool cf_file_utd(char* path) {
+__attribute__((unused)) static bool cf_file_utd(char* path) {
     cf_db_entry_t* entry = cf_db_find(path, global_db);
     if (entry == NULL) {
         return false;
