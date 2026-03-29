@@ -36,7 +36,7 @@ exit 0
 
 /* TODO: Add other threading implementations (pthreads, WinAPI) */
 #ifdef __STDC_NO_THREADS__
-#error I need threads to build this program!
+#error C11 threads library (threads.h) is needed for CForge!
 #else
 #include <threads.h>
 #endif
