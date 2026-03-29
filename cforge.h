@@ -1707,7 +1707,7 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 #define CF_BG_BLUE "\x1b[44m"
 #define CF_BG_MAGENTA "\x1b[45m"
 #define CF_BG_CYAN "\x1b[46m"
-#define CF_BG_WHITE "\x1b[37m"
+#define CF_BG_WHITE "\x1b[47m"
 #define CF_RESET "\x1b[0m"
 
 #define CF_VERSION_AT_LEAST(major, minor, patch) \
