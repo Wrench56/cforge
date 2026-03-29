@@ -485,7 +485,7 @@ static void cf_register_config(const char* name, cf_config_fn fn) {
     };
 }
 
-static void cf_setenv_wrapper(const char* ident, char* value) {
+__attribute__((unused)) static void cf_setenv_wrapper(const char* ident, char* value) {
     if (cf_num_envs >= CF_MAX_ENVS) {
         CF_ERR_LOG("Error: Maximum environment variables of %d was reached!\n", CF_MAX_ENVS);
         exit(CF_MAX_ENVS_EC);
@@ -539,7 +539,7 @@ static void cf_restore_env(size_t env_checkpoint) {
     }
 }
 
-static cf_glob_t cf_glob(const char* expr) {
+__attribute__((unused)) static cf_glob_t cf_glob(const char* expr) {
     glob_t glob_res = { 0 };
     int32_t rc = glob(expr, GLOB_NOSORT | GLOB_MARK | GLOB_NOESCAPE, NULL, &glob_res);
     
@@ -576,7 +576,7 @@ static void cf_free_glob(size_t checkpoint) {
     }
 }
 
-static char* cf_join(char* strings[], char* separator, size_t length) {
+__attribute__((unused)) static char* cf_join(char* strings[], char* separator, size_t length) {
     if (length < 1) {
         return (char*) "";
     }
@@ -612,7 +612,7 @@ static void cf_free_jstrings(size_t checkpoint) {
     }
 }
 
-static char** cf_map(const char** sources, size_t src_length, cf_map_attr_t* attrs, size_t attr_length) {
+__attribute__((unused)) static char** cf_map(const char** sources, size_t src_length, cf_map_attr_t* attrs, size_t attr_length) {
     if (cf_num_maps >= CF_MAX_MAPS) {
         CF_ERR_LOG("Error: Maximum maps of %d was reached!\n", CF_MAX_MAPS);
         exit(CF_MAX_MAPS_EC);
@@ -716,7 +716,7 @@ static void cf_free_maps(size_t checkpoint) {
 
 }
 
-static cf_split_t* __attribute__((unused)) cf_split(char* str, char delim) {
+__attribute__((unused)) static cf_split_t* cf_split(char* str, char delim) {
     if (cf_num_splits >= CF_MAX_SPLITS) {
         CF_ERR_LOG("Error: Maximum number of %d splits reached!", CF_MAX_SPLITS);
         exit(CF_MAX_SPLITS_EC);
@@ -769,13 +769,13 @@ static void cf_free_splits(size_t checkpoint) {
 
 }
 
-static inline bool cf_file_exists(char* path) {
+__attribute__((unused)) static inline bool cf_file_exists(char* path) {
     struct stat st;
     return stat(path, &st) == 0;
 }
 
 
-static void __attribute__((unused)) cf_mkdirp(const char* path) {
+__attribute__((unused)) static void cf_mkdirp(const char* path) {
     if (cf_file_exists((char*) path)) {
         return;
     }
@@ -799,13 +799,13 @@ static void __attribute__((unused)) cf_mkdirp(const char* path) {
     mkdir(temp, 0755);
 }
 
-static void __attribute__((unused)) cf_remove(const char* path) {
+__attribute__((unused)) static void cf_remove(const char* path) {
     if (remove(path) != 0) {
         CF_WRN_LOG("Warning: Could not remove \"%s\"!\n", path);
     }
 }
 
-static void __attribute__((unused)) cf_write_file(const char* path, const char* mode, ...) {
+__attribute__((unused)) static void cf_write_file(const char* path, const char* mode, ...) {
     va_list args;
     va_start(args, mode);
     char* fmt = va_arg(args, char*);
@@ -822,7 +822,7 @@ static void __attribute__((unused)) cf_write_file(const char* path, const char* 
     fclose(fp);
 }
 
-static char* __attribute__((unused)) cf_read_file(const char* path) {
+__attribute__((unused)) static char* cf_read_file(const char* path) {
     FILE* fp = fopen(path, "r");
     if (fp == NULL) {
         CF_WRN_LOG("Warning: fopen() returned NULL in cf_read_file()!\n");
