@@ -41,11 +41,6 @@ exit 0
 #include <threads.h>
 #endif
 
-/* TODO: Port this environment variable system to Windows */
-extern char** environ;
-static uint64_t denv_hash = 0;
-static uint64_t cenv_hash = 0;
-
 #define CF_VERSION_MAJOR 0
 #define CF_VERSION_MINOR 0
 #define CF_VERSION_PATCH 1
@@ -86,6 +81,11 @@ static uint64_t cenv_hash = 0;
 #define CF_DB_FAIL_EC 7
 #define CF_IMPOSSIBLE_EC 8
 
+/* TODO: Port this environment variable system to Windows */
+extern char** environ;
+static uint64_t denv_hash = 0;
+static uint64_t cenv_hash = 0;
+
 typedef void (*cf_target_fn)(void);
 typedef void (*cf_config_fn)(void);
 
@@ -95,7 +95,8 @@ typedef enum {
     DEPENDENCY,
     CONFIG_SET,
     HELP_STRING,
-    HIDDEN
+    HIDDEN,
+    VERBOSE,
 } cf_attr_type_t;
 
 typedef struct {
@@ -270,6 +271,8 @@ static char* cf_fstrings[CF_MAX_FILE_STRINGS] = { 0 };
 static size_t cf_num_fstrings = 0;
 
 static cf_state_t cf_state = REGISTER_PHASE;
+
+static bool is_verbose_target = false;
 
 static inline bool cf_empty_job(void) {
     return global_workq->front == global_workq->back;
@@ -781,6 +784,10 @@ static int cf_thrd_helper(void* queue) {
 }
 
 static void cf_execute_command(bool is_parallel, char* buffer) {
+    if (is_verbose_target) {
+        printf("%s\n", buffer);
+    }
+
     if (is_parallel) {
         mtx_t* lock = &global_workq->lock;
         mtx_lock(lock);
@@ -1354,6 +1361,15 @@ static void cf_dfs_execute(cf_target_decl_t* target) {
                 exit(CF_NOT_FOUND_EC);
                 break;
             }
+            case VERBOSE: {
+                if (is_verbose_target) {
+                    CF_WRN_LOG("Warning: VERBOSE attribute passed to target \"%s\" multiple times!\n", target->name);
+                    break;
+                }
+
+                is_verbose_target = true;
+                break;
+            }
             case HELP_STRING:
             case HIDDEN:
                 goto next_attr;
@@ -1403,6 +1419,9 @@ next_attr:
     cf_free_jstrings(jstrings_checkpoint);
     cf_free_glob(glob_checkpoint);
     cf_restore_env(env_checkpoint);
+
+    is_verbose_target = false;
+
     target->node_status = DONE;
 }
 
@@ -1615,6 +1634,12 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 #define CF_HIDDEN \
     (cf_attr_t) { \
         .type = HIDDEN, \
+        .arg.depends = { 0 } \
+    }
+
+#define CF_VERBOSE \
+    (cf_attr_t) { \
+        .type = VERBOSE, \
         .arg.depends = { 0 } \
     }
 
