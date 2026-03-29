@@ -57,6 +57,7 @@ uint64_t cenv_hash = 0;
 #define CF_MAX_JOBS 64
 #define CF_MAX_ENVS 256
 #define CF_MAX_JOIN_STRINGS 256
+#define CF_MAX_FILE_STRINGS 256
 #define CF_MAX_SPLITS 256
 #define CF_MAX_MAP_ATTRS 8
 #define CF_MAX_MAPS 64
@@ -97,6 +98,7 @@ uint64_t cenv_hash = 0;
 #define CF_DB_OOM_EC 20
 #define CF_MAX_DEFERRED_UTD_EC 21
 #define CF_MAX_SPLITS_EC 22
+#define CF_MAX_FSTRINGS_EC 23
 
 typedef void (*cf_target_fn)(void);
 typedef void (*cf_config_fn)(void);
@@ -278,6 +280,9 @@ static size_t cf_num_maps = 0;
 
 static char* cf_deferred_utd[CF_MAX_DEFERRED_UTD] = { 0 };
 static size_t cf_num_deferred_utd = 0;
+
+static char* cf_fstrings[CF_MAX_FILE_STRINGS] = { 0 };
+static size_t cf_num_fstrings = 0;
 
 static cf_state_t cf_state = REGISTER_PHASE;
 
@@ -800,7 +805,7 @@ static void __attribute__((unused)) cf_remove(const char* path) {
     }
 }
 
-static void __attribute((unused)) cf_write_file(const char* path, const char* mode, ...) {
+static void __attribute__((unused)) cf_write_file(const char* path, const char* mode, ...) {
     va_list args;
     va_start(args, mode);
     char* fmt = va_arg(args, char*);
@@ -815,6 +820,37 @@ static void __attribute((unused)) cf_write_file(const char* path, const char* mo
     vfprintf(fp, fmt, args);
     va_end(args);
     fclose(fp);
+}
+
+static char* __attribute__((unused)) cf_read_file(const char* path) {
+    FILE* fp = fopen(path, "r");
+    if (fp == NULL) {
+        CF_WRN_LOG("Warning: fopen() returned NULL in cf_read_file()!\n");
+        return NULL;
+    }
+
+    fseek(fp, 0, SEEK_END);
+    size_t sz = (size_t) ftell(fp);
+    rewind(fp);
+
+    char* buf = (char*) malloc(sz + 1);
+    if (buf == NULL) {
+        fclose(fp);
+        CF_ERR_LOG("Error: malloc() failed in cf_read_file()!\n");
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    fread(buf, 1, sz, fp);
+    buf[sz] = '\0';
+    fclose(fp);
+
+    if (cf_num_fstrings >= CF_MAX_FILE_STRINGS) {
+        CF_ERR_LOG("Error: Maximum file strings of %d reached!\n", CF_MAX_FILE_STRINGS);
+        exit(CF_MAX_FSTRINGS_EC);
+    }
+
+    cf_fstrings[cf_num_fstrings++] = buf;
+    return buf;
 }
 
 static int cf_thrd_helper(void* queue) {
@@ -1657,6 +1693,9 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 
 #define CF_APPEND(path, ...) \
     cf_write_file((char*) path, "a", __VA_ARGS__)
+
+#define CF_READ(path) \
+    cf_read_file((char*) path)
 
 #define CF_BANNER(...) \
     do { \
