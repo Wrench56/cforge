@@ -1,3 +1,4 @@
+#define _XOPEN_SOURCE 500
 #define _POSIX_C_SOURCE 200809L
 
 #ifndef CFORGE_H
@@ -32,6 +33,7 @@ exit 0
 #include <string.h>
 
 /* TODO: Port this to Windows someday */
+#include <ftw.h>
 #include <sys/stat.h>
 
 /* TODO: Add other threading implementations (pthreads, WinAPI) */
@@ -687,10 +689,17 @@ __attribute__((unused)) static void cf_mkdirp(const char* path) {
     mkdir(temp, 0755);
 }
 
-__attribute__((unused)) static void cf_remove(const char* path) {
-    if (remove(path) != 0) {
-        CF_WRN_LOG("Warning: Could not remove \"%s\"!\n", path);
+
+static int32_t cf_remove_helper(const char* fpath, const struct stat* sb, int32_t typeflag, struct FTW* ftwbuf) {
+    if (remove(fpath) != 0) {
+        CF_WRN_LOG("Warning: Could not remove \"%s\" in cf_remove_helper()!\n", fpath);
     }
+
+    return 0;
+}
+
+__attribute__((unused)) static inline void cf_remove(const char* path) {
+    nftw(path, cf_remove_helper, 64, FTW_DEPTH | FTW_PHYS);
 }
 
 __attribute__((unused)) static void cf_write_file(const char* path, const char* mode, ...) {
