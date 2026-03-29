@@ -1319,7 +1319,7 @@ static inline uint64_t cf_hash_env(char** env) {
     return hash;
 }
 
-static void cf_dfs_execute(cf_target_decl_t* target) {
+static void cf_dfs_execute(cf_target_decl_t* target, cf_config_decl_t* inherited_config) {
     if (target->node_status == DONE) {
         return;
     } else if (target->node_status == VISITING) {
@@ -1329,6 +1329,8 @@ static void cf_dfs_execute(cf_target_decl_t* target) {
 
     target->node_status = VISITING;
     cf_config_decl_t* config = NULL;
+    bool dep_ran = false;
+
     for (size_t i = 0; i < target->attribs_size; i++) {
         cf_attr_t* attrib = &target->attribs[i];
         switch (attrib->type) {
@@ -1339,14 +1341,20 @@ static void cf_dfs_execute(cf_target_decl_t* target) {
                     CF_ERR_LOG("Error: Target \"%s\" not found!\n", dep_target_name);
                     exit(CF_NOT_FOUND_EC);
                 }
-                
-                cf_dfs_execute(&cf_targets[dep_idx]);
+
+                dep_ran = true;
+                cf_dfs_execute(&cf_targets[dep_idx], (config == NULL) ? inherited_config : config);
                 break;
             }
             case CONFIG_SET: {
                 if (config != NULL) {
                     CF_WRN_LOG("Warning: Cannot set two or more configs per target. Ignoring...\n");
                     goto next_attr;
+                }
+
+                if (dep_ran == true) {
+                    CF_ERR_LOG("Error: Config attribute(s) specified later than first dependency attribute in target\"%s\"!\n", target->name);
+                    exit(CF_INVALID_STATE_EC);
                 }
                 
                 const char* conf_name = attrib->arg.configset.config_name;
@@ -1386,6 +1394,9 @@ next_attr:
     size_t env_checkpoint = cf_num_envs;
     if (config != NULL) {
         config->fn();
+        cenv_hash = cf_hash_env(environ);
+    } else if (inherited_config != NULL) {
+        inherited_config->fn();
         cenv_hash = cf_hash_env(environ);
     } else {
         /* Commands in system() can't change parent environment! */
@@ -1500,7 +1511,7 @@ next_target:
                     CF_WRN_LOG("Warning: Target \"%s\" was executed already! Skipping target...\n", argv[i]);
                     goto next_iter;
                 }
-                cf_dfs_execute(target);
+                cf_dfs_execute(target, NULL);
                 goto next_iter;
             }
         }
