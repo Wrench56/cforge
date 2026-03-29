@@ -701,6 +701,31 @@ static inline bool cf_file_exists(char* path) {
     return stat(path, &st) == 0;
 }
 
+
+static void __attribute__((unused)) cf_mkdirp(const char* path) {
+    if (cf_file_exists((char*) path)) {
+        return;
+    }
+
+    char temp[4096];
+    size_t len = strlen(path);
+    if (len >= sizeof(temp)) {
+        CF_ERR_LOG("Error: Path too long in cf_mkdirp()!\n");
+        exit(CF_IMPOSSIBLE_EC);
+    }
+
+    memcpy(temp, path, len + 1);
+    for (char* chr = temp + 1; *chr != '\0'; chr++) {
+        if (*chr == '/') {
+            *chr = '\0';
+            mkdir(temp, 0755);
+            *chr = '/';
+        }
+    }
+
+    mkdir(temp, 0755);
+}
+
 static int cf_thrd_helper(void* queue) {
     cf_work_queue* q = (cf_work_queue*) queue;
     cf_thrd_job job;
@@ -1520,6 +1545,9 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 
 #define CF_FILE_EXISTS(filepath) \
     (cf_file_exists((char*) filepath))
+
+#define CF_MKDIR(path) \
+    cf_mkdirp((char*) path);
 
 #define CF_NOP \
     do {} while (0);
