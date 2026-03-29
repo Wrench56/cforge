@@ -1555,6 +1555,16 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 #define CF_MKDIR(path) \
     cf_mkdirp((char*) path)
 
+#define CF_BANNER(...) \
+    do { \
+        static bool cf_banner_shown_##__LINE__ = false; \
+        if (!cf_banner_shown_##__LINE__) { \
+            cf_banner_shown_##__LINE__ = true; \
+            printf(__VA_ARGS__); \
+            putchar('\n'); \
+        } \
+    } while (0)
+
 #define CF_NOP() \
     do {} while (0)
 
