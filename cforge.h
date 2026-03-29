@@ -23,6 +23,7 @@ exit 0
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
 #include <glob.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -730,6 +731,23 @@ static void __attribute__((unused)) cf_remove(const char* path) {
     if (remove(path) != 0) {
         CF_WRN_LOG("Warning: Could not remove \"%s\"!\n", path);
     }
+}
+
+static inline void __attribute((unused)) cf_write_file(const char* path, const char* mode, ...) {
+    va_list args;
+    va_start(args, mode);
+    char* fmt = va_arg(args, char*);
+
+    FILE* fp = fopen(path, mode);
+    if (fp == NULL) {
+        CF_WRN_LOG("Warning: Could not write to \"%s\"!\n", path);
+        va_end(args);
+        return;
+    }
+
+    vfprintf(fp, fmt, args);
+    va_end(args);
+    fclose(fp);
 }
 
 static int cf_thrd_helper(void* queue) {
@@ -1562,6 +1580,13 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
     cf_mkdirp((char*) path)
 
 #define CF_REMOVE(path) \
+    cf_remove((char*) path)
+
+#define CF_WRITE(path, ...) \
+    cf_write_file((char*) path, "w", __VA_ARGS__)
+
+#define CF_APPEND(path, ...) \
+    cf_write_file((char*) path, "a", __VA_ARGS__)
 
 #define CF_BANNER(...) \
     do { \
