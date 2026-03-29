@@ -738,6 +738,13 @@ __attribute__((unused)) static char* cf_read_file(const char* path) {
     return buf;
 }
 
+static void cf_free_fstrings(size_t checkpoint) {
+    while (cf_num_fstrings > checkpoint) {
+        free(cf_fstrings[--cf_num_fstrings]);
+        cf_fstrings[cf_num_fstrings] = NULL;
+    }
+}
+
 static int cf_thrd_helper(void* queue) {
     cf_work_queue* q = (cf_work_queue*) queue;
     cf_thrd_job job;
@@ -1374,6 +1381,7 @@ next_attr:
     size_t jstrings_checkpoint = cf_num_jstrings;
     size_t splits_checkpoint = cf_num_splits;
     size_t maps_checkpoint = cf_num_maps;
+    size_t fstrings_checkpoint = cf_num_fstrings;
     target->fn();
 
     mtx_t* lock = &global_workq->lock;
@@ -1389,6 +1397,7 @@ next_attr:
     }
     cf_num_deferred_utd = 0;
 
+    cf_free_fstrings(fstrings_checkpoint);
     cf_free_maps(maps_checkpoint);
     cf_free_splits(splits_checkpoint);
     cf_free_jstrings(jstrings_checkpoint);
