@@ -1027,6 +1027,11 @@ static cf_db_entry_t* cf_db_find(char* path, cf_db_mem_t* db) {
 }
 
 static bool cf_db_hash_file(char* path, uint64_t* hash) {
+#ifdef CF_DISABLE_FILE_HASH
+    (void) path;
+    *hash = 0;
+    return true;
+#else
     FILE* fp = fopen(path, "rb");
     if (fp == NULL) {
         return false;
@@ -1061,7 +1066,7 @@ static bool cf_db_hash_file(char* path, uint64_t* hash) {
     *hash = xxh64(buf, (size_t) sz, 0);
     free(buf);
     return true;
-
+#endif // CF_DISABLE_FILE_HASH
 }
 
 static void cf_db_mark_utd(char* path, cf_db_mem_t* db) {
