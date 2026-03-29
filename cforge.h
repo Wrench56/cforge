@@ -1433,7 +1433,12 @@ __attribute__((weak)) int main(int argc, char** argv) {
     (void) cf_join;
 
     if (argc == 1) {
-        printf("Usage:\n ./cforge.h <target> [...]\n\nAvailable targets:\n");
+        printf(
+            "\ncforge.h - v%d.%d.%d\n\nUsage:\n ./cforge.h <target> [...]\n\nAvailable targets:\n",
+            CF_VERSION_MAJOR,
+            CF_VERSION_MINOR,
+            CF_VERSION_PATCH
+        );
         for (size_t i = 0; i < cf_num_targets; i++) {
             cf_target_decl_t target = cf_targets[i];
             const char* help_str = NULL;
