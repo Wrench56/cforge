@@ -349,106 +349,6 @@ static void cf_register_target(const char* name, cf_target_fn fn, const cf_attr_
     };
 }
 
-static inline uint64_t cf_hash_env(char** env);
-uint64_t xxh64(uint8_t* data, size_t len, uint64_t seed);
-static void cf_free_maps(size_t checkpoint);
-static void cf_free_glob(size_t checkpoint);
-static void cf_free_jstrings(size_t checkpoint);
-static void cf_free_splits(size_t checkpoint);
-static void cf_restore_env(size_t env_checkpoint);
-static void cf_db_mark_utd(char* path, cf_db_mem_t* db);
-static void cf_dfs_execute(cf_target_decl_t* target) {
-    if (target->node_status == DONE) {
-        return;
-    } else if (target->node_status == VISITING) {
-        CF_ERR_LOG("Error: Dependency cycle detected for \"%s\"\n", target->name);
-        exit(CF_TARGET_DEP_CYCLE_EC);
-    }
-
-    target->node_status = VISITING;
-    cf_config_decl_t* config = NULL;
-    for (size_t i = 0; i < target->attribs_size; i++) {
-        cf_attr_t* attrib = &target->attribs[i];
-        switch (attrib->type) {
-            case DEPENDENCY: {
-                const char* dep_target_name = attrib->arg.depends.target_name;
-                size_t dep_idx = cf_find_target_index(dep_target_name);
-                if (dep_idx >= cf_num_targets) {
-                    CF_ERR_LOG("Error: Target \"%s\" not found!\n", dep_target_name);
-                    exit(CF_NOT_FOUND_EC);
-                }
-                
-                cf_dfs_execute(&cf_targets[dep_idx]);
-                break;
-            }
-            case CONFIG_SET: {
-                if (config != NULL) {
-                    CF_WRN_LOG("Warning: Cannot set two or more configs per target. Ignoring...\n");
-                    goto next_attr;
-                }
-                
-                const char* conf_name = attrib->arg.configset.config_name;
-                for (size_t c_idx = 0; c_idx < cf_num_configs; c_idx++) {
-                    if (strncmp(conf_name, cf_configs[c_idx].name, CF_MAX_NAME_LENGTH) == 0) {
-                        config = &cf_configs[c_idx];
-                        goto next_attr;
-                    }
-                }
-                
-                CF_ERR_LOG("Error: Config \"%s\" not found!\n", conf_name);
-                exit(CF_NOT_FOUND_EC);
-                break;
-            }
-            case HELP_STRING:
-            case HIDDEN:
-                goto next_attr;
-            case UNKNOWN: {
-                CF_ERR_LOG("Error: Unknown attribute given for target \"%s\"\n", target->name);
-                exit(CF_UNKNOWN_ATTR_EC);
-            }
-        }
-
-next_attr:
-        continue;
-    }
-
-    size_t env_checkpoint = cf_num_envs;
-    if (config != NULL) {
-        config->fn();
-        cenv_hash = cf_hash_env(environ);
-    } else {
-        /* Commands in system() can't change parent environment! */
-        cenv_hash = denv_hash;
-    }
-
-
-    size_t glob_checkpoint = cf_num_globs;
-    size_t jstrings_checkpoint = cf_num_jstrings;
-    size_t splits_checkpoint = cf_num_splits;
-    size_t maps_checkpoint = cf_num_maps;
-    target->fn();
-
-    mtx_t* lock = &global_workq->lock;
-    mtx_lock(lock);
-    while (global_workq->active_jobs > 0 || !cf_empty_job()) {
-        cnd_wait(&global_workq->no_job, lock);
-    }
-    mtx_unlock(lock);
-
-    for (size_t i = 0; i < cf_num_deferred_utd; i++) {
-        cf_db_mark_utd(cf_deferred_utd[i], global_db);
-        free(cf_deferred_utd[i]);
-    }
-    cf_num_deferred_utd = 0;
-
-    cf_free_maps(maps_checkpoint);
-    cf_free_splits(splits_checkpoint);
-    cf_free_jstrings(jstrings_checkpoint);
-    cf_free_glob(glob_checkpoint);
-    cf_restore_env(env_checkpoint);
-    target->node_status = DONE;
-}
-
 static void cf_register_config(const char* name, cf_config_fn fn) {
     if (cf_state != REGISTER_PHASE) {
         CF_ERR_LOG("Error: Invalid cf_state (%d) when registering config!\n", cf_state);
@@ -921,6 +821,82 @@ static void cf_execute_command(bool is_parallel, char* buffer) {
     free(buffer);
 }
 
+/* Compact XXH64 implementation */
+static const uint64_t XXH64_P1 = 0x9E3779B185EBCA87;
+static const uint64_t XXH64_P2 = 0xC2B2AE3D27D4EB4F;
+static const uint64_t XXH64_P3 = 0x165667B19E3779F9;
+static const uint64_t XXH64_P4 = 0x85EBCA77C2B2AE63;
+static const uint64_t XXH64_P5 = 0x27D4EB2F165667C5;
+
+static inline uint64_t xxh64_rotl(uint64_t x, int r) {
+    return (x << r) | (x >> (64 - r));
+}
+
+static inline uint64_t xxh64_read64(const void *p) {
+    uint64_t v;
+    memcpy(&v, p, 8);
+    return v;
+}
+
+static inline uint64_t xxh64_read32(const void *p) {
+    uint32_t v;
+    memcpy(&v, p, 4);
+    return v;
+}
+
+static inline uint64_t xxh64_round(uint64_t acc, uint64_t input) {
+    return xxh64_rotl(acc + input * XXH64_P2, 31) * XXH64_P1;
+}
+
+static uint64_t xxh64(uint8_t* data, size_t len, uint64_t seed) {
+    uint8_t* p = data;
+    uint8_t *end = p + len;
+    uint64_t h;
+
+    if (len >= 32) {
+        uint64_t v[] = {seed + XXH64_P1 + XXH64_P2, seed + XXH64_P2, seed, seed - XXH64_P1};
+        while (p <= end - 32) {
+            for (int i = 0; i < 4; i++) {
+                v[i] = xxh64_round(v[i], xxh64_read64(p + i * 8));
+            }
+
+            p += 32;
+        }
+
+        h = xxh64_rotl(v[0],1) + xxh64_rotl(v[1],7) + xxh64_rotl(v[2],12) + xxh64_rotl(v[3],18);
+        for (int i = 0; i < 4; i++) {
+            h = (h ^ xxh64_round(0, v[i])) * XXH64_P1 + XXH64_P4;
+        }
+    } else {
+        h = seed + XXH64_P5;
+    }
+
+    h += (uint64_t)len;
+
+    while (p + 8 <= end) {
+        h ^= xxh64_round(0, xxh64_read64(p));
+        h = xxh64_rotl(h, 27) * XXH64_P1 + XXH64_P4;
+        p += 8;
+    }
+    while (p + 4 <= end) {
+        h ^= xxh64_read32(p) * XXH64_P1;
+        h = xxh64_rotl(h, 23) * XXH64_P2 + XXH64_P3;
+        p += 4;
+    }
+    while (p < end) {
+        h ^= *p * XXH64_P5;
+        h = xxh64_rotl(h, 11) * XXH64_P1;
+        p++;
+    }
+
+    h ^= h >> 33;
+    h *= XXH64_P2;
+    h ^= h >> 29;
+    h *= XXH64_P3;
+    h ^= h >> 32;
+    return h;
+}
+
 /* CForge DB implementation */
 static void cf_db_free(cf_db_mem_t* db) {
     if (db == NULL) {
@@ -1330,81 +1306,98 @@ static inline uint64_t cf_hash_env(char** env) {
     return hash;
 }
 
-/* Compact XXH64 implementation */
-static const uint64_t XXH64_P1 = 0x9E3779B185EBCA87;
-static const uint64_t XXH64_P2 = 0xC2B2AE3D27D4EB4F;
-static const uint64_t XXH64_P3 = 0x165667B19E3779F9;
-static const uint64_t XXH64_P4 = 0x85EBCA77C2B2AE63;
-static const uint64_t XXH64_P5 = 0x27D4EB2F165667C5;
+static void cf_dfs_execute(cf_target_decl_t* target) {
+    if (target->node_status == DONE) {
+        return;
+    } else if (target->node_status == VISITING) {
+        CF_ERR_LOG("Error: Dependency cycle detected for \"%s\"\n", target->name);
+        exit(CF_TARGET_DEP_CYCLE_EC);
+    }
 
-static inline uint64_t xxh64_rotl(uint64_t x, int r) {
-    return (x << r) | (x >> (64 - r));
-}
-
-static inline uint64_t xxh64_read64(const void *p) {
-    uint64_t v;
-    memcpy(&v, p, 8);
-    return v;
-}
-
-static inline uint64_t xxh64_read32(const void *p) {
-    uint32_t v;
-    memcpy(&v, p, 4);
-    return v;
-}
-
-static inline uint64_t xxh64_round(uint64_t acc, uint64_t input) {
-    return xxh64_rotl(acc + input * XXH64_P2, 31) * XXH64_P1;
-}
-
-uint64_t xxh64(uint8_t* data, size_t len, uint64_t seed) {
-    uint8_t* p = data;
-    uint8_t *end = p + len;
-    uint64_t h;
-
-    if (len >= 32) {
-        uint64_t v[] = {seed + XXH64_P1 + XXH64_P2, seed + XXH64_P2, seed, seed - XXH64_P1};
-        while (p <= end - 32) {
-            for (int i = 0; i < 4; i++) {
-                v[i] = xxh64_round(v[i], xxh64_read64(p + i * 8));
+    target->node_status = VISITING;
+    cf_config_decl_t* config = NULL;
+    for (size_t i = 0; i < target->attribs_size; i++) {
+        cf_attr_t* attrib = &target->attribs[i];
+        switch (attrib->type) {
+            case DEPENDENCY: {
+                const char* dep_target_name = attrib->arg.depends.target_name;
+                size_t dep_idx = cf_find_target_index(dep_target_name);
+                if (dep_idx >= cf_num_targets) {
+                    CF_ERR_LOG("Error: Target \"%s\" not found!\n", dep_target_name);
+                    exit(CF_NOT_FOUND_EC);
+                }
+                
+                cf_dfs_execute(&cf_targets[dep_idx]);
+                break;
             }
-
-            p += 32;
+            case CONFIG_SET: {
+                if (config != NULL) {
+                    CF_WRN_LOG("Warning: Cannot set two or more configs per target. Ignoring...\n");
+                    goto next_attr;
+                }
+                
+                const char* conf_name = attrib->arg.configset.config_name;
+                for (size_t c_idx = 0; c_idx < cf_num_configs; c_idx++) {
+                    if (strncmp(conf_name, cf_configs[c_idx].name, CF_MAX_NAME_LENGTH) == 0) {
+                        config = &cf_configs[c_idx];
+                        goto next_attr;
+                    }
+                }
+                
+                CF_ERR_LOG("Error: Config \"%s\" not found!\n", conf_name);
+                exit(CF_NOT_FOUND_EC);
+                break;
+            }
+            case HELP_STRING:
+            case HIDDEN:
+                goto next_attr;
+            case UNKNOWN: {
+                CF_ERR_LOG("Error: Unknown attribute given for target \"%s\"\n", target->name);
+                exit(CF_UNKNOWN_ATTR_EC);
+            }
         }
 
-        h = xxh64_rotl(v[0],1) + xxh64_rotl(v[1],7) + xxh64_rotl(v[2],12) + xxh64_rotl(v[3],18);
-        for (int i = 0; i < 4; i++) {
-            h = (h ^ xxh64_round(0, v[i])) * XXH64_P1 + XXH64_P4;
-        }
+next_attr:
+        continue;
+    }
+
+    size_t env_checkpoint = cf_num_envs;
+    if (config != NULL) {
+        config->fn();
+        cenv_hash = cf_hash_env(environ);
     } else {
-        h = seed + XXH64_P5;
+        /* Commands in system() can't change parent environment! */
+        cenv_hash = denv_hash;
     }
 
-    h += (uint64_t)len;
 
-    while (p + 8 <= end) {
-        h ^= xxh64_round(0, xxh64_read64(p));
-        h = xxh64_rotl(h, 27) * XXH64_P1 + XXH64_P4;
-        p += 8;
-    }
-    while (p + 4 <= end) {
-        h ^= xxh64_read32(p) * XXH64_P1;
-        h = xxh64_rotl(h, 23) * XXH64_P2 + XXH64_P3;
-        p += 4;
-    }
-    while (p < end) {
-        h ^= *p * XXH64_P5;
-        h = xxh64_rotl(h, 11) * XXH64_P1;
-        p++;
-    }
+    size_t glob_checkpoint = cf_num_globs;
+    size_t jstrings_checkpoint = cf_num_jstrings;
+    size_t splits_checkpoint = cf_num_splits;
+    size_t maps_checkpoint = cf_num_maps;
+    target->fn();
 
-    h ^= h >> 33;
-    h *= XXH64_P2;
-    h ^= h >> 29;
-    h *= XXH64_P3;
-    h ^= h >> 32;
-    return h;
+    mtx_t* lock = &global_workq->lock;
+    mtx_lock(lock);
+    while (global_workq->active_jobs > 0 || !cf_empty_job()) {
+        cnd_wait(&global_workq->no_job, lock);
+    }
+    mtx_unlock(lock);
+
+    for (size_t i = 0; i < cf_num_deferred_utd; i++) {
+        cf_db_mark_utd(cf_deferred_utd[i], global_db);
+        free(cf_deferred_utd[i]);
+    }
+    cf_num_deferred_utd = 0;
+
+    cf_free_maps(maps_checkpoint);
+    cf_free_splits(splits_checkpoint);
+    cf_free_jstrings(jstrings_checkpoint);
+    cf_free_glob(glob_checkpoint);
+    cf_restore_env(env_checkpoint);
+    target->node_status = DONE;
 }
+
 
 __attribute__((weak)) int main(int argc, char** argv) {
     (void) cf_register_config;
