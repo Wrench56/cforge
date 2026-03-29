@@ -1534,6 +1534,9 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 #define CF_JOIN(arr, sep, len) \
     cf_join(arr, sep, len);
 
+#define CF_JOIN_GLOB(glob, sep) \
+    cf_join(glob.p, sep, glob.c);
+
 #define CF_FILE_UTD(filepath) \
     (cf_file_utd((char*) filepath))
 
