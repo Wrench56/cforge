@@ -77,28 +77,14 @@ uint64_t cenv_hash = 0;
 #define CF_WRN_LOG(...) fprintf(stdout, __VA_ARGS__)
 
 #define CF_SUCCESS_EC 0
-#define CF_MAX_TARGETS_EC 1
-#define CF_TARGET_NOT_FOUND_EC 2
-#define CF_MAX_CONFIGS_EC 3
-#define CF_INVALID_STATE_EC 4
-#define CF_NAME_TOO_LONG_EC 5
-#define CF_CLIB_FAIL_EC 6
-#define CF_MAX_GLOBS_EC 7
-#define CF_MAX_COMMAND_LENGTH_EC 8
-#define CF_TARGET_DEP_CYCLE_EC 10
-#define CF_CONFIG_NOT_FOUND_EC 11
-#define CF_UNKNOWN_ATTR_EC 12
-#define CF_MAX_ENVS_EC 13
-#define CF_MAX_JSTRINGS_EC 14
-#define CF_MAX_MAPS_EC 15
-#define CF_IMPOSSIBLE_EC 16
-#define CF_DB_IO_FAIL 17
-#define CF_DB_MAGIC_FAIL 18
-#define CF_DB_VERSION_FAIL 19
-#define CF_DB_OOM_EC 20
-#define CF_MAX_DEFERRED_UTD_EC 21
-#define CF_MAX_SPLITS_EC 22
-#define CF_MAX_FSTRINGS_EC 23
+#define CF_MAX_REACHED_EC 1
+#define CF_NOT_FOUND_EC 2
+#define CF_INVALID_STATE_EC 3
+#define CF_CLIB_FAIL_EC 4
+#define CF_TARGET_DEP_CYCLE_EC 5
+#define CF_UNKNOWN_ATTR_EC 6
+#define CF_DB_FAIL_EC 7
+#define CF_IMPOSSIBLE_EC 8
 
 typedef void (*cf_target_fn)(void);
 typedef void (*cf_config_fn)(void);
@@ -333,12 +319,12 @@ static void cf_register_target(const char* name, cf_target_fn fn, const cf_attr_
 
     if (strlen(name) > CF_MAX_NAME_LENGTH) {
         CF_ERR_LOG("Error: The name \"%s\" when registering target is too long (max name length: %d)\n", name, CF_MAX_NAME_LENGTH);
-        exit(CF_NAME_TOO_LONG_EC);
+        exit(CF_MAX_REACHED_EC);
     }
 
     if (cf_num_targets >= CF_MAX_TARGETS) {
         CF_ERR_LOG("Error: Maximum targets of %d was reached!\n", CF_MAX_TARGETS);
-        exit(CF_MAX_TARGETS_EC);
+        exit(CF_MAX_REACHED_EC);
     }
 
     void* attribs_block;
@@ -389,7 +375,7 @@ static void cf_dfs_execute(cf_target_decl_t* target) {
                 size_t dep_idx = cf_find_target_index(dep_target_name);
                 if (dep_idx >= cf_num_targets) {
                     CF_ERR_LOG("Error: Target \"%s\" not found!\n", dep_target_name);
-                    exit(CF_TARGET_NOT_FOUND_EC);
+                    exit(CF_NOT_FOUND_EC);
                 }
                 
                 cf_dfs_execute(&cf_targets[dep_idx]);
@@ -410,7 +396,7 @@ static void cf_dfs_execute(cf_target_decl_t* target) {
                 }
                 
                 CF_ERR_LOG("Error: Config \"%s\" not found!\n", conf_name);
-                exit(CF_CONFIG_NOT_FOUND_EC);
+                exit(CF_NOT_FOUND_EC);
                 break;
             }
             case HELP_STRING:
@@ -471,12 +457,12 @@ static void cf_register_config(const char* name, cf_config_fn fn) {
 
     if (strlen(name) > CF_MAX_NAME_LENGTH) {
         CF_ERR_LOG("Error: The name \"%s\" when registering config is too long (max name length: %d)\n", name, CF_MAX_NAME_LENGTH);
-        exit(CF_NAME_TOO_LONG_EC);
+        exit(CF_MAX_REACHED_EC);
     }
 
     if (cf_num_configs >= CF_MAX_CONFIGS) {
         CF_ERR_LOG("Error: Maximum configs of %d was reached!\n", CF_MAX_CONFIGS);
-        exit(CF_MAX_CONFIGS_EC);
+        exit(CF_MAX_REACHED_EC);
     }
 
     cf_configs[cf_num_configs++] = (cf_config_decl_t) {
@@ -488,7 +474,7 @@ static void cf_register_config(const char* name, cf_config_fn fn) {
 __attribute__((unused)) static void cf_setenv_wrapper(const char* ident, char* value) {
     if (cf_num_envs >= CF_MAX_ENVS) {
         CF_ERR_LOG("Error: Maximum environment variables of %d was reached!\n", CF_MAX_ENVS);
-        exit(CF_MAX_ENVS_EC);
+        exit(CF_MAX_REACHED_EC);
     }
 
     char* envvar = getenv(ident);
@@ -559,7 +545,7 @@ __attribute__((unused)) static cf_glob_t cf_glob(const char* expr) {
 
     if (cf_num_globs >= CF_MAX_GLOBS) {
         CF_ERR_LOG("Error: Maximum globs of %d was reached!\n", CF_MAX_GLOBS);
-        exit(CF_MAX_GLOBS_EC);
+        exit(CF_MAX_REACHED_EC);
     }
 
     cf_globs[cf_num_globs++] = glob_res;
@@ -583,7 +569,7 @@ __attribute__((unused)) static char* cf_join(char* strings[], char* separator, s
 
     if (cf_num_jstrings >= CF_MAX_JOIN_STRINGS) {
         CF_ERR_LOG("Error: Maximum joined strings of %d was reached!\n", CF_MAX_JOIN_STRINGS);
-        exit(CF_MAX_JSTRINGS_EC);
+        exit(CF_MAX_REACHED_EC);
     }
 
     char* jstring = (char*) malloc(CF_MAX_JOIN_STRING_LEN);
@@ -615,7 +601,7 @@ static void cf_free_jstrings(size_t checkpoint) {
 __attribute__((unused)) static char** cf_map(const char** sources, size_t src_length, cf_map_attr_t* attrs, size_t attr_length) {
     if (cf_num_maps >= CF_MAX_MAPS) {
         CF_ERR_LOG("Error: Maximum maps of %d was reached!\n", CF_MAX_MAPS);
-        exit(CF_MAX_MAPS_EC);
+        exit(CF_MAX_REACHED_EC);
     }
     
     
@@ -719,7 +705,7 @@ static void cf_free_maps(size_t checkpoint) {
 __attribute__((unused)) static cf_split_t* cf_split(char* str, char delim) {
     if (cf_num_splits >= CF_MAX_SPLITS) {
         CF_ERR_LOG("Error: Maximum number of %d splits reached!", CF_MAX_SPLITS);
-        exit(CF_MAX_SPLITS_EC);
+        exit(CF_MAX_REACHED_EC);
     }
 
     char* buf = strdup(str);
@@ -846,7 +832,7 @@ __attribute__((unused)) static char* cf_read_file(const char* path) {
 
     if (cf_num_fstrings >= CF_MAX_FILE_STRINGS) {
         CF_ERR_LOG("Error: Maximum file strings of %d reached!\n", CF_MAX_FILE_STRINGS);
-        exit(CF_MAX_FSTRINGS_EC);
+        exit(CF_MAX_REACHED_EC);
     }
 
     cf_fstrings[cf_num_fstrings++] = buf;
@@ -1020,21 +1006,21 @@ static cf_db_mem_t* cf_db_load(const char* db_path) {
         CF_ERR_LOG("Error: Could not read database header\n");   
         fclose(fp);
         cf_db_free(db);
-        exit(CF_DB_IO_FAIL);
+        exit(CF_DB_FAIL_EC);
     }
 
     if (hdr->magic_header != CF_MAGIC_HEADER_VALUE) {
         CF_ERR_LOG("Error: Magic database header code is invalid!\n");
         fclose(fp);
         cf_db_free(db);
-        exit(CF_DB_MAGIC_FAIL);
+        exit(CF_DB_FAIL_EC);
     }
 
     if (hdr->version != CF_DB_CVERSION) {
         CF_ERR_LOG("Error: CForge version (v%d) does not match database version (v%d)\n", CF_DB_CVERSION, hdr->version);
         fclose(fp);
         cf_db_free(db);
-        exit(CF_DB_VERSION_FAIL);
+        exit(CF_DB_FAIL_EC);
     }
 
     cf_db_entry_t* entries = (cf_db_entry_t*) malloc(hdr->entry_cnt * sizeof(cf_db_entry_t));
@@ -1049,7 +1035,7 @@ static cf_db_mem_t* cf_db_load(const char* db_path) {
         CF_ERR_LOG("Error: Could not read database entries\n");
         fclose(fp);
         cf_db_free(db);
-        exit(CF_DB_IO_FAIL);
+        exit(CF_DB_FAIL_EC);
     }
 
     cf_db_lstring_t* strings = (cf_db_lstring_t*) malloc(hdr->string_sz);
@@ -1064,7 +1050,7 @@ static cf_db_mem_t* cf_db_load(const char* db_path) {
         CF_ERR_LOG("Error: Could not read database entries\n");
         fclose(fp);
         cf_db_free(db);
-        exit(CF_DB_IO_FAIL);
+        exit(CF_DB_FAIL_EC);
     }
     
     db->entries = entries;
@@ -1083,7 +1069,7 @@ static void cf_db_save(const char* db_path, cf_db_mem_t* db) {
     if (fp == NULL) {
         CF_ERR_LOG("Error: Could not open database file\n");
         cf_db_free(db);
-        exit(CF_DB_IO_FAIL);
+        exit(CF_DB_FAIL_EC);
     }
 
     cf_db_hdr_t* hdr = db->header;
@@ -1095,7 +1081,7 @@ static void cf_db_save(const char* db_path, cf_db_mem_t* db) {
         CF_ERR_LOG("Error: Could not write database header\n");
         fclose(fp);
         cf_db_free(db);
-        exit(CF_DB_IO_FAIL);
+        exit(CF_DB_FAIL_EC);
     }
 
     if (db->entries != NULL) {
@@ -1103,7 +1089,7 @@ static void cf_db_save(const char* db_path, cf_db_mem_t* db) {
             CF_ERR_LOG("Error: Could not write database entries\n");
             fclose(fp);
             cf_db_free(db);
-            exit(CF_DB_IO_FAIL);
+            exit(CF_DB_FAIL_EC);
         }
     }
     
@@ -1112,7 +1098,7 @@ static void cf_db_save(const char* db_path, cf_db_mem_t* db) {
             CF_ERR_LOG("Error: Could not write new database entries\n");
             fclose(fp);
             cf_db_free(db);
-            exit(CF_DB_IO_FAIL);
+            exit(CF_DB_FAIL_EC);
         }
     }
 
@@ -1121,7 +1107,7 @@ static void cf_db_save(const char* db_path, cf_db_mem_t* db) {
             CF_ERR_LOG("Error: Could not write database strings\n");
             fclose(fp);
             cf_db_free(db);
-            exit(CF_DB_IO_FAIL);
+            exit(CF_DB_FAIL_EC);
         }
     }
 
@@ -1130,7 +1116,7 @@ static void cf_db_save(const char* db_path, cf_db_mem_t* db) {
             CF_ERR_LOG("Error: Could not write new database strings\n");
             fclose(fp);
             cf_db_free(db);
-            exit(CF_DB_IO_FAIL);
+            exit(CF_DB_FAIL_EC);
         }
     }
 
@@ -1232,12 +1218,12 @@ static void cf_db_mark_utd(char* path, cf_db_mem_t* db) {
         size_t strl = strlen(path);
         if (strl > UINT16_MAX) {
             CF_ERR_LOG("Error: Path length exceeds UINT16 length\n");
-            exit(CF_DB_OOM_EC);
+            exit(CF_MAX_REACHED_EC);
         }
         size_t needed = sizeof(uint16_t) + strl + 1;
         if (str_offset + needed > db->pstrings_sz) {
-            CF_ERR_LOG("Error: pending strings buffer ran out of space!");
-            exit(CF_DB_OOM_EC);
+            CF_ERR_LOG("Error: Pending strings buffer ran out of space!");
+            exit(CF_MAX_REACHED_EC);
         }
 
         uint8_t* slab = (uint8_t*) db->pending_strings;
@@ -1247,8 +1233,8 @@ static void cf_db_mark_utd(char* path, cf_db_mem_t* db) {
 
         size_t idx = db->pentries_idx;
         if (idx >= db->pentries_max) {
-            CF_ERR_LOG("Error: pending entries buffer ran out of space!");
-            exit(CF_DB_OOM_EC);
+            CF_ERR_LOG("Error: Pending entries buffer ran out of space!");
+            exit(CF_MAX_REACHED_EC);
         }
 
         entry = &db->pending_entries[idx];
@@ -1282,7 +1268,7 @@ static void cf_db_mark_utd(char* path, cf_db_mem_t* db) {
 static void cf_db_defer_mark_utd(char* path) {
     if (cf_num_deferred_utd >= CF_MAX_DEFERRED_UTD) {
         CF_ERR_LOG("Error: Maximum deferred UTD marks reached!");
-        exit(CF_MAX_DEFERRED_UTD_EC);
+        exit(CF_MAX_REACHED_EC);
     }
 
     char* ptr = strdup(path);
@@ -1495,7 +1481,7 @@ next_target:
         }
 
         CF_ERR_LOG("Error: Target \"%s\" not found!\n", argv[i]);
-        return CF_TARGET_NOT_FOUND_EC;
+        return CF_NOT_FOUND_EC;
 
         next_iter:
             continue;
@@ -1593,7 +1579,7 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
             exit(CF_CLIB_FAIL_EC); \
         }else if (n >= CF_MAX_COMMAND_LENGTH) { \
             CF_ERR_LOG("Error: Maximum command length of %d was reached!\n", CF_MAX_COMMAND_LENGTH); \
-            exit(CF_MAX_COMMAND_LENGTH_EC); \
+            exit(CF_MAX_REACHED_EC); \
         } \
         cf_execute_command(parallel, buffer); \
     } while (0);
