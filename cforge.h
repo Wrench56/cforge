@@ -1426,7 +1426,7 @@ cleanup:
     static void cf_config_##name_ident(void)
 
 #define CF_GLOB(expr) \
-    cf_glob(expr);
+    cf_glob(expr)
 
 
 /* Hack to make the `for` syntax possible for `CF_GLOBS_EACH()` */
@@ -1504,7 +1504,7 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
         .arg.depends = { 0 } \
     }
 
-#define CF_SET_ENV(ident, value) cf_setenv_wrapper(#ident, value);
+#define CF_SET_ENV(ident, value) cf_setenv_wrapper(#ident, value)
 #define CF_ENV(ident) getenv(#ident)
 
 #define CF_MAPA(sources, len, ...) \
@@ -1535,7 +1535,7 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
     cf_join(arr, sep, len);
 
 #define CF_JOIN_GLOB(glob, sep) \
-    cf_join(glob.p, sep, glob.c);
+    cf_join(glob.p, sep, glob.c)
 
 #define CF_FILE_UTD(filepath) \
     (cf_file_utd((char*) filepath))
@@ -1544,19 +1544,19 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
     (!cf_file_utd((char*) filepath))
 
 #define CF_FILE_MARK_UTD(filepath) \
-    cf_db_mark_utd(filepath, global_db);
+    cf_db_mark_utd(filepath, global_db)
 
 #define CF_FILE_MARK_UTDP(filepath) \
-    cf_db_defer_mark_utd((char*) filepath);
+    cf_db_defer_mark_utd((char*) filepath)
 
 #define CF_FILE_EXISTS(filepath) \
     (cf_file_exists((char*) filepath))
 
 #define CF_MKDIR(path) \
-    cf_mkdirp((char*) path);
+    cf_mkdirp((char*) path)
 
-#define CF_NOP \
-    do {} while (0);
+#define CF_NOP() \
+    do {} while (0)
 
 #define CF_BOLD "\x1b[1m"
 #define CF_UNDERLINE "\x1b[4m"
