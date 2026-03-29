@@ -57,6 +57,7 @@ uint64_t cenv_hash = 0;
 #define CF_MAX_JOBS 64
 #define CF_MAX_ENVS 256
 #define CF_MAX_JOIN_STRINGS 256
+#define CF_MAX_SPLITS 256
 #define CF_MAX_MAP_ATTRS 8
 #define CF_MAX_MAPS 64
 #define CF_MAX_DEFERRED_UTD 512
@@ -95,6 +96,7 @@ uint64_t cenv_hash = 0;
 #define CF_DB_VERSION_FAIL 19
 #define CF_DB_OOM_EC 20
 #define CF_MAX_DEFERRED_UTD_EC 21
+#define CF_MAX_SPLITS_EC 22
 
 typedef void (*cf_target_fn)(void);
 typedef void (*cf_config_fn)(void);
@@ -228,6 +230,12 @@ typedef struct {
 } cf_map_entry_t;
 
 typedef struct {
+    size_t c;
+    char** p;
+    char* buf;
+} cf_split_t;
+
+typedef struct {
     char* command;
 } cf_thrd_job;
 
@@ -261,6 +269,9 @@ static size_t cf_num_envs = 0;
 
 static char* cf_jstrings[CF_MAX_JOIN_STRINGS] = { 0 };
 static size_t cf_num_jstrings = 0;
+
+static cf_split_t cf_splits[CF_MAX_SPLITS] = { 0 };
+static size_t cf_num_splits = 0;
 
 static cf_map_entry_t cf_maps[CF_MAX_MAPS] = { 0 };
 static size_t cf_num_maps = 0;
@@ -352,6 +363,7 @@ uint64_t xxh64(uint8_t* data, size_t len, uint64_t seed);
 static void cf_free_maps(size_t checkpoint);
 static void cf_free_glob(size_t checkpoint);
 static void cf_free_jstrings(size_t checkpoint);
+static void cf_free_splits(size_t checkpoint);
 static void cf_restore_env(size_t env_checkpoint);
 static void cf_db_mark_utd(char* path, cf_db_mem_t* db);
 static void cf_dfs_execute(cf_target_decl_t* target) {
@@ -421,6 +433,7 @@ next_attr:
 
     size_t glob_checkpoint = cf_num_globs;
     size_t jstrings_checkpoint = cf_num_jstrings;
+    size_t splits_checkpoint = cf_num_splits;
     size_t maps_checkpoint = cf_num_maps;
     target->fn();
 
@@ -438,6 +451,7 @@ next_attr:
     cf_num_deferred_utd = 0;
 
     cf_free_maps(maps_checkpoint);
+    cf_free_splits(splits_checkpoint);
     cf_free_jstrings(jstrings_checkpoint);
     cf_free_glob(glob_checkpoint);
     cf_restore_env(env_checkpoint);
@@ -697,6 +711,59 @@ static void cf_free_maps(size_t checkpoint) {
 
 }
 
+static cf_split_t* __attribute__((unused)) cf_split(char* str, char delim) {
+    if (cf_num_splits >= CF_MAX_SPLITS) {
+        CF_ERR_LOG("Error: Maximum number of %d splits reached!", CF_MAX_SPLITS);
+        exit(CF_MAX_SPLITS_EC);
+    }
+
+    char* buf = strdup(str);
+    if (buf == NULL) {
+        CF_ERR_LOG("Error: strdup() failed in cf_split()!\n");
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    size_t count = 1;
+    for (char* s = buf; *s; s++) {
+        if (*s == delim) {
+            ++count;
+        }
+    }
+
+    char** parts = (char**) malloc(count * sizeof(char*));
+    if (parts == NULL) {
+        CF_ERR_LOG("Error: malloc() failed in cf_split()!\n");
+        free(buf);
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    size_t idx = 0;
+    parts[idx++] = buf;
+    for (char* s = buf; *s; s++) {
+        if (*s == delim) {
+            *s = '\0';
+            parts[idx++] = s + 1;
+        }
+    }
+
+    cf_splits[cf_num_splits] = (cf_split_t) {
+        .c = idx,
+        .p = parts,
+        .buf = buf
+    };
+
+    return &cf_splits[cf_num_splits++];
+}
+static void cf_free_splits(size_t checkpoint) {
+    while (cf_num_splits > checkpoint) {
+        cf_split_t entry = cf_splits[--cf_num_splits];
+        free(entry.p);
+        free(entry.buf);
+        cf_splits[cf_num_splits] = (cf_split_t) { 0 };
+    }
+
+}
+
 static inline bool cf_file_exists(char* path) {
     struct stat st;
     return stat(path, &st) == 0;
@@ -733,7 +800,7 @@ static void __attribute__((unused)) cf_remove(const char* path) {
     }
 }
 
-static inline void __attribute((unused)) cf_write_file(const char* path, const char* mode, ...) {
+static void __attribute((unused)) cf_write_file(const char* path, const char* mode, ...) {
     va_list args;
     va_start(args, mode);
     char* fmt = va_arg(args, char*);
@@ -1560,6 +1627,9 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 
 #define CF_JOIN_GLOB(glob, sep) \
     cf_join(glob.p, sep, glob.c)
+
+#define CF_SPLIT(str, delim) \
+    cf_split(str, delim)
 
 #define CF_FILE_UTD(filepath) \
     (cf_file_utd((char*) filepath))
