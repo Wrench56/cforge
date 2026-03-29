@@ -726,6 +726,12 @@ static void __attribute__((unused)) cf_mkdirp(const char* path) {
     mkdir(temp, 0755);
 }
 
+static void __attribute__((unused)) cf_remove(const char* path) {
+    if (remove(path) != 0) {
+        CF_WRN_LOG("Warning: Could not remove \"%s\"!\n", path);
+    }
+}
+
 static int cf_thrd_helper(void* queue) {
     cf_work_queue* q = (cf_work_queue*) queue;
     cf_thrd_job job;
@@ -1554,6 +1560,8 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 
 #define CF_MKDIR(path) \
     cf_mkdirp((char*) path)
+
+#define CF_REMOVE(path) \
 
 #define CF_BANNER(...) \
     do { \
