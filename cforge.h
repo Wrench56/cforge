@@ -43,8 +43,8 @@ exit 0
 
 /* TODO: Port this environment variable system to Windows */
 extern char** environ;
-uint64_t denv_hash = 0;
-uint64_t cenv_hash = 0;
+static uint64_t denv_hash = 0;
+static uint64_t cenv_hash = 0;
 
 #define CF_VERSION_MAJOR 0
 #define CF_VERSION_MINOR 0
