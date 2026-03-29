@@ -699,6 +699,29 @@ static int32_t cf_remove_helper(const char* fpath, const struct stat* sb, int32_
 }
 
 __attribute__((unused)) static inline void cf_remove(const char* path) {
+    if (path == NULL) {
+        CF_WRN_LOG("Warning: Path passed to cf_remove() was NULL!\n");
+        return;
+    }
+
+    if (path[0] == '/') {
+        const char* sptr = strchr(path + 1, '/');
+        if (sptr == NULL) {
+            CF_ERR_LOG("Error: Refusing to remove top-level path \"%s\"!\n", path);
+            exit(CF_CLIB_FAIL_EC);
+        }
+
+        while (*(++sptr) != '\0') {
+            if (*sptr != '/') {
+                goto remove_entry;
+            }
+        }
+
+        CF_ERR_LOG("Error: Refusing to remove top-level path \"%s\"!\n", path);
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+remove_entry:
     nftw(path, cf_remove_helper, 64, FTW_DEPTH | FTW_PHYS);
 }
 
