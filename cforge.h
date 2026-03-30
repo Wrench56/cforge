@@ -502,7 +502,7 @@ static void cf_free_jstrings(size_t checkpoint) {
     }
 }
 
-__attribute__((unused)) static char** cf_map(const char** sources, size_t src_length, cf_map_attr_t* attrs, size_t attr_length) {
+__attribute__((unused)) static char** cf_map(char** sources, size_t src_length, cf_map_attr_t* attrs, size_t attr_length) {
     if (cf_num_maps >= CF_MAX_MAPS) {
         CF_ERR_LOG("Error: Maximum maps of %d was reached!\n", CF_MAX_MAPS);
         exit(CF_MAX_REACHED_EC);
@@ -1698,7 +1698,7 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
     cf_map(sources, len, (cf_map_attr_t[]) { __VA_ARGS__ }, (sizeof((cf_map_attr_t[]) { __VA_ARGS__ })/sizeof(cf_map_attr_t)))
 
 #define CF_MAP(source, ...) \
-    CF_MAPA((const char*[]) { source }, 1, __VA_ARGS__)[0]
+    CF_MAPA((char*[]) { source }, 1, __VA_ARGS__)[0]
 
 #define CF_MAP_EXT(new_ext) \
     (cf_map_attr_t) { \
