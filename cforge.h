@@ -575,7 +575,7 @@ __attribute__((unused)) static char** cf_map(const char** sources, size_t src_le
                     }
 
                     size_t length = strlen(attr.n_dirs);
-                    memmove(outstr + length, slash, strlen(slash) + 1);
+                    memmove(outstr + length, slash + 1, strlen(slash + 1) + 1);
                     memcpy(outstr, attr.n_dirs, length);
                     break;
                 }
