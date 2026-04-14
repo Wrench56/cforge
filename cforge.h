@@ -1,5 +1,5 @@
-#define _XOPEN_SOURCE 500
 #define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
 
 #ifndef CFORGE_H
 #define CFORGE_H
