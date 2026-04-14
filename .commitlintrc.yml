@@ -27,6 +27,7 @@ rules:
       - parallel
       - utils
       - db
+      - example
   subject-empty:
     level: error
   type:
