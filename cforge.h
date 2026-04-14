@@ -5,7 +5,7 @@
 #define CFORGE_H
 
 #if 0
-{ [ "cforge.c" -nt ".b" ] || [ "cforge.h" -nt ".b" ]; } && { cc -O2 -Wall -Wextra -Wshadow -Wpedantic -Wconversion -Wstrict-prototypes -Wformat=2 -Wmissing-prototypes -Wold-style-definition -Wdouble-promotion -Wno-unused-parameter -std=c11 "cforge.c" -o "./.b" || exit 4; }
+{ [ ! -f ".b" ] || [ "cforge.c" -nt ".b" ] || [ "cforge.h" -nt ".b" ]; } && { cc -O2 -Wall -Wextra -Wshadow -Wpedantic -Wconversion -Wstrict-prototypes -Wformat=2 -Wmissing-prototypes -Wold-style-definition -Wdouble-promotion -Wno-unused-parameter -std=c11 "cforge.c" -o "./.b" || exit 4; }
 exec "./.b" "$@"
 exit 0
 #endif
