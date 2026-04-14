@@ -43,7 +43,6 @@ CF_TARGET(compile, CF_HIDDEN, CF_VERBOSE) {
         char* output = CF_MAP(file, CF_MAP_EXT("o"), CF_MAP_PARENT("build"));
         if (CF_FILE_NOT_UTD(file) || CF_FILE_NOT_UTD(output)) {
             CF_BANNER("Compiling...");
-            CF_BANNER("Compiling2...");
             printf("[" CF_YELLOW "CC" CF_RESET "] %s\n", file);
             CF_RUNP("cc %s %s -o %s",
                 CF_ENV(cflags),
