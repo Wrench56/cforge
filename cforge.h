@@ -13,7 +13,7 @@ exit 0
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 /*                                                     */
 /*  CForge Build Tool                                  */
-/*                                             v1.0.1  */
+/*                                             v1.0.2  */
 /*                                                     */
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 /*                                                     */
@@ -45,7 +45,7 @@ exit 0
 
 #define CF_VERSION_MAJOR 1
 #define CF_VERSION_MINOR 0
-#define CF_VERSION_PATCH 1
+#define CF_VERSION_PATCH 2
 
 #define CF_MAX_TARGETS 64
 #define CF_MAX_CONFIGS 64
