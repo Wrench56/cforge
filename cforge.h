@@ -1113,13 +1113,17 @@ static void cf_db_save(const char* db_path, cf_db_mem_t* db) {
             exit(CF_DB_FAIL_EC);
         }
     }
-    
+
     if (db->pentries_idx > 0) {
-        if (fwrite(db->pending_entries, sizeof(cf_db_entry_t), db->pentries_idx, fp) != db->pentries_idx) {
-            CF_ERR_LOG("Error: Could not write new database entries\n");
-            fclose(fp);
-            cf_db_free(db);
-            exit(CF_DB_FAIL_EC);
+        for (size_t i = 0; i < db->pentries_idx; i++) {
+            cf_db_entry_t patched = db->pending_entries[i];
+            patched.path_offset += string_sz;
+            if (fwrite(&patched, sizeof(cf_db_entry_t), 1, fp) != 1) {
+                CF_ERR_LOG("Error: Could not write new database entries\n");
+                fclose(fp);
+                cf_db_free(db);
+                exit(CF_DB_FAIL_EC);
+            }
         }
     }
 
