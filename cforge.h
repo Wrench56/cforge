@@ -1156,9 +1156,9 @@ static cf_db_entry_t* cf_db_find(char* path, cf_db_mem_t* db) {
         cf_db_entry_t* entry = &db->pending_entries[i];
         if (hash == entry->path_hash) {
             uint8_t* slab = (uint8_t*) db->pending_strings;
-            uint16_t* len_slot = (uint16_t*) (slab + entry->path_offset);
-            uint16_t strl = *len_slot;
-            char* strptr = (char*) (len_slot + 1);
+            uint16_t strl;
+            memcpy(&strl, slab + entry->path_offset, sizeof(strl));
+            char* strptr = (char*) (slab + entry->path_offset + sizeof(uint16_t));
             if (strncmp(path, strptr, strl) == 0) {
                 return entry;
             } else {
@@ -1175,9 +1175,9 @@ static cf_db_entry_t* cf_db_find(char* path, cf_db_mem_t* db) {
         cf_db_entry_t* entry = &db->entries[i];
         if (hash == entry->path_hash) {
             uint8_t* slab = (uint8_t*) db->strings;
-            uint16_t* len_slot = (uint16_t*) (slab + entry->path_offset);
-            uint16_t strl = *len_slot;
-            char* strptr = (char*) (len_slot + 1);
+            uint16_t strl;
+            memcpy(&strl, slab + entry->path_offset, sizeof(strl));
+            char* strptr = (char*) (slab + entry->path_offset + sizeof(uint16_t));
             if (strncmp(path, strptr, strl) == 0) {
                 return &db->entries[i];
             } else {
@@ -1252,9 +1252,9 @@ __attribute__((unused)) static void cf_db_mark_utd(char* path, cf_db_mem_t* db) 
         }
 
         uint8_t* slab = (uint8_t*) db->pending_strings;
-        uint16_t* len_slot = (uint16_t*) (slab + db->pstrings_off);
-        *len_slot = (uint16_t) strl;
-        memcpy(len_slot + 1, path, strl + 1);
+        uint16_t len16 = (uint16_t) strl;
+        memcpy(slab + db->pstrings_off, &len16, sizeof(len16));
+        memcpy(slab + db->pstrings_off + sizeof(uint16_t), path, strl + 1);
 
         size_t idx = db->pentries_idx;
         if (idx >= db->pentries_max) {
