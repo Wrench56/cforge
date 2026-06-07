@@ -1472,6 +1472,44 @@ next_attr:
     target->node_status = DONE;
 }
 
+static inline void cf_usage(void) {
+    printf(
+        "\ncforge.h - v%d.%d.%d\n\nUsage:\n ./cforge.h <target> [...]\n\nAvailable targets:\n",
+        CF_VERSION_MAJOR,
+        CF_VERSION_MINOR,
+        CF_VERSION_PATCH
+    );
+    for (size_t i = 0; i < cf_num_targets; i++) {
+        cf_target_decl_t target = cf_targets[i];
+        const char* help_str = NULL;
+        bool hidden = false;
+        for (size_t j = 0; j < target.attribs_size; j++) {
+            if (target.attribs[j].type == HELP_STRING) {
+                if (help_str != NULL) {
+                    CF_WRN_LOG("Warning: Help string for target \"%s\" provided multiple times! Using first definition.", target.name);
+                    continue;
+                }
+                help_str = target.attribs[j].arg.helpstring.help_string;
+            } else if (target.attribs[j].type == HIDDEN) {
+                if (hidden) {
+                    CF_WRN_LOG("Warning: Hidden attribute for target \"%s\" used multiple times!",  target.name);
+                    continue;
+                }
+                hidden = true;
+            }
+        }
+
+        if (hidden) {
+            continue;
+        }
+
+        if (help_str == NULL) {
+            printf(" > %s\n", cf_targets[i].name);
+        } else {
+            printf(" > %s - %s\n", cf_targets[i].name, help_str);
+        }
+    }
+}
 
 __attribute__((weak)) int main(int argc, char** argv) {
     (void) cf_register_config;
@@ -1480,45 +1518,7 @@ __attribute__((weak)) int main(int argc, char** argv) {
     (void) cf_join;
 
     if (argc == 1) {
-        printf(
-            "\ncforge.h - v%d.%d.%d\n\nUsage:\n ./cforge.h <target> [...]\n\nAvailable targets:\n",
-            CF_VERSION_MAJOR,
-            CF_VERSION_MINOR,
-            CF_VERSION_PATCH
-        );
-        for (size_t i = 0; i < cf_num_targets; i++) {
-            cf_target_decl_t target = cf_targets[i];
-            const char* help_str = NULL;
-            bool hidden = false;
-            for (size_t j = 0; j < target.attribs_size; j++) {
-                if (target.attribs[j].type == HELP_STRING) {
-                    if (help_str != NULL) {
-                        CF_WRN_LOG("Warning: Help string for target \"%s\" provided multiple times! Using first definition.", target.name);
-                        continue;
-                    }
-                    help_str = target.attribs[j].arg.helpstring.help_string;
-                } else if (target.attribs[j].type == HIDDEN) {
-                    if (hidden) {
-                        CF_WRN_LOG("Warning: Hidden attribute for target \"%s\" used multiple times!",  target.name);
-                        continue;
-                    }
-                    hidden = true;
-                }
-            }
-
-            if (hidden) {
-                goto next_target;
-            }
-
-            if (help_str == NULL) {
-                printf(" > %s\n", cf_targets[i].name);
-            } else {
-                printf(" > %s - %s\n", cf_targets[i].name, help_str);
-            }
-next_target:
-            continue;
-        }
-
+        cf_usage();
         goto cleanup;
     }
 
