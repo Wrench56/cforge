@@ -1864,6 +1864,9 @@ cleanup:
     } \
     static void cf_config_##name_ident(void)
 
+#define CF_CONFIG_EXTENDS(name_ident) \
+    cf_config_##name_ident()
+
 #define CF_GLOB(expr) \
     cf_glob(expr)
 
