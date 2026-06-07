@@ -1696,6 +1696,7 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
     }
 
 #define CF_SET_ENV(ident, value) cf_setenv_wrapper(#ident, value)
+#define CF_MASK_ENV(ident) cf_setenv_wrapper(#ident, "")
 #define CF_ENV(ident) getenv(#ident)
 
 #define CF_MAPA(sources, len, ...) \
