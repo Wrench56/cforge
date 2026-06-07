@@ -689,6 +689,13 @@ __attribute__((unused)) static void cf_mkdirp(const char* path) {
     mkdir(temp, 0755);
 }
 
+__attribute__((unused)) static void cf_move(const char* src, const char* dst) {
+    if (rename(src, dst) != 0) {
+        CF_ERR_LOG("Error: Could not move \"%s\" to \"%s\"", src, dst);
+        exit(CF_CLIB_FAIL_EC);
+    }
+}
+
 
 static int32_t cf_remove_helper(const char* fpath, const struct stat* sb, int32_t typeflag, struct FTW* ftwbuf) {
     if (remove(fpath) != 0) {
@@ -1806,6 +1813,9 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 
 #define CF_MKDIR(path) \
     cf_mkdirp((char*) path)
+
+#define CF_MV(src, dst) \
+    cf_move(src, dst)
 
 #define CF_REMOVE(path) \
     cf_remove((char*) path)
