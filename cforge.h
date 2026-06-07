@@ -23,6 +23,8 @@ exit 0
 /*                                                     */
 /* =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-= */
 
+#include <dirent.h>
+#include <errno.h>
 #include <glob.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -691,9 +693,141 @@ __attribute__((unused)) static void cf_mkdirp(const char* path) {
 
 __attribute__((unused)) static void cf_move(const char* src, const char* dst) {
     if (rename(src, dst) != 0) {
-        CF_ERR_LOG("Error: Could not move \"%s\" to \"%s\"", src, dst);
+        CF_ERR_LOG("Error: Could not move \"%s\" to \"%s\"!\n", src, dst);
         exit(CF_CLIB_FAIL_EC);
     }
+}
+
+__attribute__((unused)) static void cf_copy_file(const char* src, const char* dst) {
+    uint8_t error_code = 0;
+
+    // TODO: Optimize for OSes.
+    FILE* srcf = fopen(src, "rb");
+    if (srcf == NULL) {
+        CF_ERR_LOG("Error: Could not open \"%s\" for reading!\n", src);
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    FILE* dstf = fopen(dst, "wb");
+    if (dstf == NULL) {
+        fclose(srcf);
+        CF_ERR_LOG("Error: Could not open \"%s\" for writing!\n", dst);
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    char buf[(64 * 1024)];
+    for (;;) {
+        size_t n = fread(buf, 1, sizeof(buf), srcf);
+        if (n > 0) {
+            if (fwrite(buf, 1, n, dstf) != n) {
+                CF_ERR_LOG("Error: Could not write to \"%s\"!\n", dst);
+                error_code = CF_CLIB_FAIL_EC;
+                goto cleanup;
+            }
+        }
+
+        if (n < sizeof(buf)) {
+            if (ferror(srcf)) {
+                CF_ERR_LOG("Error: Could not read from \"%s\"!\n", src);
+                error_code = CF_CLIB_FAIL_EC;
+                goto cleanup;
+            }
+
+            break;
+        }
+    }
+
+cleanup:
+    fclose(srcf);
+    if (fclose(dstf) != 0) {
+        CF_ERR_LOG("Error: Could not close \"%s\"!\n", dst);
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    if (error_code != 0) {
+        exit(error_code);
+    }
+}
+
+__attribute__((unused)) static void cf_copy(const char* src, const char* dst) {
+    struct stat st;
+    uint8_t error_code = 0;
+
+    if (stat(src, &st) != 0) {
+        CF_ERR_LOG("Error: Could not stat \"%s\"!\n", src);
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    if (S_ISREG(st.st_mode)) {
+        cf_copy_file(src, dst);
+        chmod(dst, st.st_mode & 0777);
+        return;
+    }
+
+    if (!S_ISDIR(st.st_mode)) {
+        CF_ERR_LOG("Error: Cannot copy non-regular file \"%s\"!\n", src);
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    if (mkdir(dst, st.st_mode & 0777) != 0) {
+        if (errno != EEXIST) {
+            CF_ERR_LOG("Error: Could not create directory \"%s\"!\n", dst);
+            exit(CF_CLIB_FAIL_EC);
+        }
+    }
+
+    DIR* dir = opendir(src);
+    if (dir == NULL) {
+        CF_ERR_LOG("Error: Could not open dir \"%s\"!\n", src);
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    char* src_path = (char*) malloc(PATH_MAX);
+    char* dst_path = (char*) malloc(PATH_MAX);
+    if (src_path == NULL || dst_path == NULL) {
+        CF_ERR_LOG("Error: malloc() failed in cf_copy()!\n");
+        error_code = CF_CLIB_FAIL_EC;
+        goto cleanup;
+    }
+
+    struct dirent* ent;
+    for (;;) {
+        ent = readdir(dir);
+        if (ent == NULL) {
+            break;
+        }
+
+        if (strcmp(ent->d_name, ".") == 0) {
+            continue;
+        }
+
+        if (strcmp(ent->d_name, "..") == 0) {
+            continue;
+        }
+
+        int32_t n = snprintf(src_path, PATH_MAX, "%s/%s", src, ent->d_name);
+        int32_t m = snprintf(dst_path, PATH_MAX, "%s/%s", dst, ent->d_name);
+        if (n >= PATH_MAX || m >= PATH_MAX || n < 0 || m < 0) {
+            CF_ERR_LOG("Error: Path truncation detected in cf_copy()!\n");
+            error_code = CF_CLIB_FAIL_EC;
+            goto cleanup;
+        }
+        cf_copy(src_path, dst_path);
+    }
+
+cleanup:
+    free(src_path);
+    free(dst_path);
+    if (closedir(dir) != 0) {
+        CF_ERR_LOG("Error: Could not close directory \"%s\"!\n", src);
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    if (error_code != 0) {
+        exit(error_code);
+    }
+
+    chmod(dst, st.st_mode & 0777);
 }
 
 
@@ -1816,6 +1950,9 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 
 #define CF_MV(src, dst) \
     cf_move(src, dst)
+
+#define CF_CP(src, dst) \
+    cf_copy(src, dst)
 
 #define CF_REMOVE(path) \
     cf_remove((char*) path)
