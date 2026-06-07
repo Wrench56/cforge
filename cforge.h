@@ -51,6 +51,10 @@ exit 0
 #endif
 
 #if defined(__FreeBSD__)
+#ifndef __BSD_VISIBLE
+#define __BSD_VISIBLE 1
+#endif
+
 #include <sys/types.h>
 #include <fcntl.h>
 #include <unistd.h>
