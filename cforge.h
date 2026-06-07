@@ -1523,6 +1523,63 @@ __attribute__((weak)) int main(int argc, char** argv) {
     }
 
     global_db = cf_db_load(".cforge.db");
+
+#ifndef CF_DISABLE_ENV_AUTOMASK
+    static const char* const cf_automask_env[] = {
+        "SHLVL",
+        "COLORTERM",
+        "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION",
+
+        "SSH_CONNECTION",
+        "SSH_CLIENT",
+        "SSH_AUTH_SOCK",
+        "SSH_AGENT_PID",
+
+        "PID",
+        "PPID",
+        "OLDPWD",
+        "_",
+
+        "XDG_CURRENT_DESKTOP",
+        "XDG_SESSION_DESKTOP",
+        "XDG_SESSION_ID",
+        "XDG_RUNTIME_DIR",
+        "XDG_SESSION_TYPE",
+        "XDG_SEAT",
+        "XDG_VTNR",
+
+        "DBUS_SESSION_BUS_ADDRESS",
+        "SESSION_MANAGER",
+        "GDMSESSION",
+        "GNOME_DESKTOP_SESSION_ID",
+        "KDE_FULL_SESSION",
+        "KDE_SESSION_VERSION",
+        "KDE_SESSION_UID",
+        "QT_QPA_PLATFORM",
+
+        "DISPLAY",
+        "DE",
+        "DESKTOP_SESSION",
+        "WAYLAND_DISPLAY",
+        "XAUTHORITY",
+        "WINDOWID",
+        "WINDOWPATH",
+        "I3SOCK",
+
+        "LS_COLORS",
+        "GREP_COLORS",
+        "LESS",
+        "LESSOPEN",
+        "LESSCLOSE",
+
+        NULL,
+    };
+
+    for (size_t i = 0; cf_automask_env[i] != NULL; i++) {
+        unsetenv(cf_automask_env[i]);
+    }
+#endif // CF_DISABLE_ENV_AUTOMASK
     denv_hash = cf_hash_env(environ);
 
     global_workq = (cf_work_queue*) malloc(sizeof(cf_work_queue));
