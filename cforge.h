@@ -2085,8 +2085,14 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
         } \
     } while (0)
 
+#if defined(__COUNTER__)
+#define CF_UNIQUE_ID __COUNTER__
+#else
+#define CF_UNIQUE_ID __LINE__
+#endif
+
 #define CF_BANNER(...) \
-    CF_BANNER_IMPL(__COUNTER__, __VA_ARGS__)
+    CF_BANNER_IMPL(CF_UNIQUE_ID, __VA_ARGS__)
 
 #define CF_NOP() \
     do {} while (0)
