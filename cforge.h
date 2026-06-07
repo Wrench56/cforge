@@ -1,6 +1,12 @@
 #define _POSIX_C_SOURCE 200809L
 #define _XOPEN_SOURCE 700
 
+#if defined(__linux__) || defined(linux)
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#endif
+
 #ifndef CFORGE_H
 #define CFORGE_H
 
@@ -37,6 +43,10 @@ exit 0
 
 #if defined(__linux__) || defined(linux)
 #include <fcntl.h>
+
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <unistd.h>
 #endif
 
@@ -757,7 +767,7 @@ __attribute__((unused)) static void cf_copy_file(const char* src, const char* ds
         exit(CF_OS_FAIL_EC);
     }
 
-    off_t len = 0;
+    ssize_t len = 0;
     struct stat st;
     if (fstat(src_fd, &st) != 0) {
         CF_ERR_LOG("Error: Could not stat \"%s\"!\n", src);
@@ -767,7 +777,7 @@ __attribute__((unused)) static void cf_copy_file(const char* src, const char* ds
     }
 
     while (len > 0) {
-        ssize_t ret = copy_file_range(src_fd, NULL, dst_fd, NULL, len, 0);
+        ssize_t ret = copy_file_range(src_fd, NULL, dst_fd, NULL, (size_t) len, 0);
         if (ret < 0) {
             CF_ERR_LOG("Error: copy_file_range() in cf_copy_file() failed!\n");
             error_code = CF_OS_FAIL_EC;
