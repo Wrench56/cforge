@@ -34,6 +34,16 @@ exit 0
 #include <stdio.h>
 #include <string.h>
 
+#if defined(__linux__) || defined(linux)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
+#if defined(__FreeBSD__)
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 /* TODO: Port this to Windows someday */
 #include <ftw.h>
 #include <sys/stat.h>
@@ -83,7 +93,8 @@ exit 0
 #define CF_TARGET_DEP_CYCLE_EC 5
 #define CF_UNKNOWN_ATTR_EC 6
 #define CF_DB_FAIL_EC 7
-#define CF_IMPOSSIBLE_EC 8
+#define CF_OS_FAIL_EC 8
+#define CF_IMPOSSIBLE_EC 9
 
 /* TODO: Port this environment variable system to Windows */
 extern char** environ;
@@ -700,8 +711,51 @@ __attribute__((unused)) static void cf_move(const char* src, const char* dst) {
 
 __attribute__((unused)) static void cf_copy_file(const char* src, const char* dst) {
     uint8_t error_code = 0;
+#if defined(__FreeBSD__) || defined(__linux__) || defined(linux)
+    int32_t src_fd = open(src, O_RDONLY);
+    if (src_fd < 0) {
+        CF_ERR_LOG("Error: Could not open \"%s\" for reading!\n", src);
+        exit(CF_OS_FAIL_EC);
+    }
 
-    // TODO: Optimize for OSes.
+    int32_t dst_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (dst_fd < 0) {
+        close(src_fd);
+        CF_ERR_LOG("Error: Could not open \"%s\" for writing!\n", dst);
+        exit(CF_OS_FAIL_EC);
+    }
+
+    off_t len = 0;
+    struct stat st;
+    if (fstat(src_fd, &st) != 0) {
+        CF_ERR_LOG("Error: Could not stat \"%s\"!\n", src);
+        error_code = CF_OS_FAIL_EC;
+    } else {
+        len = st.st_size;
+    }
+
+    while (len > 0) {
+        ssize_t ret = copy_file_range(src_fd, NULL, dst_fd, NULL, len, 0);
+        if (ret < 0) {
+            CF_ERR_LOG("Error: copy_file_range() in cf_copy_file() failed!\n");
+            error_code = CF_OS_FAIL_EC;
+            break;
+        }
+
+        if (ret == 0) {
+            break;
+        }
+
+        len -= ret;
+    }
+
+    close(src_fd);
+    close(dst_fd);
+    if (error_code != 0) {
+        exit(error_code);
+    }
+
+#else
     FILE* srcf = fopen(src, "rb");
     if (srcf == NULL) {
         CF_ERR_LOG("Error: Could not open \"%s\" for reading!\n", src);
@@ -747,6 +801,8 @@ cleanup:
     if (error_code != 0) {
         exit(error_code);
     }
+#endif
+
 }
 
 __attribute__((unused)) static void cf_copy(const char* src, const char* dst) {
@@ -829,7 +885,6 @@ cleanup:
 
     chmod(dst, st.st_mode & 0777);
 }
-
 
 static int32_t cf_remove_helper(const char* fpath, const struct stat* sb, int32_t typeflag, struct FTW* ftwbuf) {
     if (remove(fpath) != 0) {
