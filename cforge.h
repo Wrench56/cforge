@@ -41,6 +41,7 @@ exit 0
 
 #if defined(__FreeBSD__)
 #include <sys/types.h>
+#include <fcntl.h>
 #include <unistd.h>
 #endif
 
