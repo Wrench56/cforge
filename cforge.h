@@ -423,6 +423,36 @@ __attribute__((unused)) static void cf_setenv_wrapper(const char* ident, char* v
     }
 }
 
+__attribute__((unused)) static void cf_joinenv_wrapper(bool is_append, const char* ident, char* value) {
+    const char* envvar = getenv(ident);
+    if (envvar == NULL) {
+        cf_setenv_wrapper(ident, value);
+        return;
+    }
+
+    size_t envvar_len = strlen(envvar);
+    size_t value_len = strlen(value);
+
+    char* joined = (char*) malloc(envvar_len + value_len + 1);
+    if (joined == NULL) {
+        CF_ERR_LOG("Error: malloc() failed in cf_joinenv_wrapper()\n");
+        exit(CF_CLIB_FAIL_EC);
+    }
+
+    if (is_append) {
+        memcpy(joined, envvar, envvar_len);
+        memcpy(joined + envvar_len, value, value_len);
+        joined[envvar_len + value_len] = '\0';
+    } else {
+        memcpy(joined, value, value_len);
+        memcpy(joined + value_len, envvar, envvar_len);
+        joined[envvar_len + value_len] = '\0';
+    }
+    
+    cf_setenv_wrapper(ident, joined);
+    free(joined);
+}
+
 static void cf_restore_env(size_t env_checkpoint) {
     cf_env_restore_t envres;
     while (cf_num_envs > env_checkpoint) {
@@ -1953,6 +1983,8 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
     }
 
 #define CF_SET_ENV(ident, value) cf_setenv_wrapper(#ident, value)
+#define CF_APPEND_ENV(ident, value) cf_joinenv_wrapper(true, #ident, value)
+#define CF_PREPEND_ENV(ident, value) cf_joinenv_wrapper(false, #ident, value)
 #define CF_MASK_ENV(ident) cf_setenv_wrapper(#ident, "")
 #define CF_ENV(ident) getenv(#ident)
 
