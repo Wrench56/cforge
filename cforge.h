@@ -967,10 +967,11 @@ remove_entry:
     nftw(path, cf_remove_helper, 64, FTW_DEPTH | FTW_PHYS);
 }
 
-__attribute__((unused)) static void cf_write_file(const char* path, const char* mode, ...) {
+__attribute__((format(printf, 3, 4)))
+__attribute__((unused))
+static void cf_write_file(const char* path, const char* mode, const char* fmt, ...) {
     va_list args;
-    va_start(args, mode);
-    char* fmt = va_arg(args, char*);
+    va_start(args, fmt);
 
     FILE* fp = fopen(path, mode);
     if (fp == NULL) {
