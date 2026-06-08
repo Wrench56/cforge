@@ -1947,7 +1947,7 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
             CF_ERR_LOG("Error: malloc() failed in CF_INTERNAL_RUNNER\n"); \
             exit(CF_CLIB_FAIL_EC); \
         } \
-        int n = snprintf(buffer, CF_MAX_COMMAND_LENGTH, format_str, ##__VA_ARGS__); \
+        int n = snprintf(buffer, CF_MAX_COMMAND_LENGTH, format_str, __VA_ARGS__); \
         if (n < 0) { \
             CF_ERR_LOG("Error: snprintf() failed in CF_INTERNAL_RUNNER\n"); \
             exit(CF_CLIB_FAIL_EC); \
@@ -1958,8 +1958,8 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
         cf_execute_command(parallel, buffer); \
     } while (0);
 
-#define CF_RUNP(format_str, ...) CF_INTERNAL_RUNNER(true, format_str, ##__VA_ARGS__)
-#define CF_RUN(format_str, ...) CF_INTERNAL_RUNNER(false, format_str, ##__VA_ARGS__)
+#define CF_RUNP(format_str, ...) CF_INTERNAL_RUNNER(true, format_str, __VA_ARGS__)
+#define CF_RUN(format_str, ...) CF_INTERNAL_RUNNER(false, format_str, __VA_ARGS__)
 
 #define CF_DEPENDS(target_ident) \
     (cf_attr_t) { \
