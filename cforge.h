@@ -597,24 +597,25 @@ __attribute__((unused)) static char** cf_map(char** sources, size_t src_length, 
             cf_map_attr_t attr = attrs[j];
             switch (attr.type) {
                 case MAP_EXT: {
-                    /* TODO: Handle directories with dots in their path */
                     const char* dot = strrchr(outstr, '.');
+                    const char* slash = strrchr(outstr, '/');
                     size_t ext_len = strlen(attr.n_ext);
+
+                    if (dot != NULL && slash != NULL && dot < slash) {
+                        dot = NULL;
+                    }
 
                     size_t length = 0;
                     if (dot == NULL) {
                         length = strlen(outstr);
-                        if (ext_len > 0) {
-                            outstr[length++] = '.';
-                        }
                     } else {
                         length = (size_t) (dot - outstr);
-                        if (ext_len > 0) {
-                            outstr[length++] = '.';
-                        }
                     }
 
-                    size_t ext_len = strlen(attr.n_ext);
+                    if (ext_len > 0) {
+                        outstr[length++] = '.';
+                    }
+
                     memcpy(outstr + length, attr.n_ext, ext_len);
                     outstr[length + ext_len] = '\0';
                     break;
