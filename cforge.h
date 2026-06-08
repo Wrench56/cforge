@@ -599,13 +599,19 @@ __attribute__((unused)) static char** cf_map(char** sources, size_t src_length, 
                 case MAP_EXT: {
                     /* TODO: Handle directories with dots in their path */
                     const char* dot = strrchr(outstr, '.');
+                    size_t ext_len = strlen(attr.n_ext);
 
                     size_t length = 0;
                     if (dot == NULL) {
                         length = strlen(outstr);
-                        outstr[length++] = '.';
+                        if (ext_len > 0) {
+                            outstr[length++] = '.';
+                        }
                     } else {
-                        length = (size_t) (dot - outstr + 1);
+                        length = (size_t) (dot - outstr);
+                        if (ext_len > 0) {
+                            outstr[length++] = '.';
+                        }
                     }
 
                     size_t ext_len = strlen(attr.n_ext);
