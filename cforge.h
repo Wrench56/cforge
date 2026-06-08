@@ -2085,7 +2085,7 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
         } \
     } while (0)
 
-#if defined(__COUNTER__)
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ > 202311L && defined(__COUNTER__)
 #define CF_UNIQUE_ID __COUNTER__
 #else
 #define CF_UNIQUE_ID __LINE__
