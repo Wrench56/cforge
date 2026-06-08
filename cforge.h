@@ -1941,6 +1941,35 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
         cf_ci_##filename < cf_cgh_##filename.glob.p + cf_cgh_##filename.glob.c; \
         filename = *++cf_ci_##filename)
 
+#define CF__PP_ARG_N( \
+     _1, _2, _3, _4, _5, _6, _7, _8, _9,_10, \
+    _11,_12,_13,_14,_15,_16,_17,_18,_19,_20, \
+    _21,_22,_23,_24,_25,_26,_27,_28,_29,_30, \
+    _31,_32,_33,_34,_35,_36,_37,_38,_39,_40, \
+    _41,_42,_43,_44,_45,_46,_47,_48,_49,_50, \
+    _51,_52,_53,_54,_55,_56,_57,_58,_59,_60, \
+    _61,_62,_63, N, ...) N
+
+#define CF__HAS_ARGS(...) \
+    CF__PP_ARG_N( \
+        __VA_ARGS__,\
+        M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M, \
+        M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M, \
+        M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M,M, \
+        M,M,1,M,M \
+    )
+
+#define CF__CAT_(a, b) a##b
+#define CF__CAT(a, b) CF__CAT_(a, b)
+
+#define CF_RUN(...) CF__CAT(CF_RUN_,  CF__HAS_ARGS(__VA_ARGS__))(__VA_ARGS__)
+#define CF_RUNP(...) CF__CAT(CF_RUNP_, CF__HAS_ARGS(__VA_ARGS__))(__VA_ARGS__)
+
+#define CF_RUN_1(fmt) CF_INTERNAL_RUNNER(false, "%s", fmt)
+#define CF_RUN_M(fmt, ...) CF_INTERNAL_RUNNER(false, fmt, __VA_ARGS__)
+#define CF_RUNP_1(fmt) CF_INTERNAL_RUNNER(true,  "%s", fmt)
+#define CF_RUNP_M(fmt, ...) CF_INTERNAL_RUNNER(true,  fmt, __VA_ARGS__)
+
 #define CF_INTERNAL_RUNNER(parallel, format_str, ...) \
     do { \
         char* buffer = malloc(CF_MAX_COMMAND_LENGTH); \
@@ -1958,9 +1987,6 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
         } \
         cf_execute_command(parallel, buffer); \
     } while (0);
-
-#define CF_RUNP(format_str, ...) CF_INTERNAL_RUNNER(true, format_str, __VA_ARGS__)
-#define CF_RUN(format_str, ...) CF_INTERNAL_RUNNER(false, format_str, __VA_ARGS__)
 
 #define CF_DEPENDS(target_ident) \
     (cf_attr_t) { \
