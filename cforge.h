@@ -1986,7 +1986,7 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
             exit(CF_MAX_REACHED_EC); \
         } \
         cf_execute_command(parallel, buffer); \
-    } while (0);
+    } while (0)
 
 #define CF_DEPENDS(target_ident) \
     (cf_attr_t) { \
