@@ -2087,7 +2087,7 @@ static inline cf_glob_iter_hack_t cf_glob_begin_hack(const char *expr) {
 #define CF_CP(src, dst) \
     cf_copy(src, dst)
 
-#define CF_REMOVE(path) \
+#define CF_RM(path) \
     cf_remove((char*) path)
 
 #define CF_WRITE(path, ...) \
